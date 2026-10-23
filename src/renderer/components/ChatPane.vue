@@ -41,7 +41,10 @@ function onMessageSaved(msg: ChatMessage): void {
 }
 
 onMounted(() => {
-  chat.listen(onMessageSaved)
+  chat.listen({
+    onDone: onMessageSaved,
+    onFinish: (id) => sessions.setRunning(id, false)
+  })
 })
 
 watch(
@@ -72,6 +75,7 @@ async function send(): Promise<void> {
     timestamp: new Date().toISOString()
   }
   sessions.messages = [...sessions.messages, optimistic]
+  sessions.setRunning(current.value.id, true)
   void scrollToBottom()
 
   await chat.send(current.value.id, text)

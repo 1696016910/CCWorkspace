@@ -3,12 +3,14 @@ import { onMounted, ref } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import ChatPane from './components/ChatPane.vue'
 import SettingsPage from './components/SettingsPage.vue'
+import TrashDialog from './components/TrashDialog.vue'
 import { useWorkspaceStore } from './stores/workspace'
 import { useSessionStore } from './stores/session'
 
 const ws = useWorkspaceStore()
 const sessions = useSessionStore()
 const settingsOpen = ref(false)
+const trashOpen = ref(false)
 
 onMounted(async () => {
   await ws.load()
@@ -33,11 +35,12 @@ onMounted(async () => {
     </header>
 
     <div class="workspace">
-      <Sidebar @open-settings="settingsOpen = true" />
+      <Sidebar @open-settings="settingsOpen = true" @open-trash="trashOpen = true" />
       <ChatPane />
     </div>
 
     <SettingsPage v-if="settingsOpen" @close="settingsOpen = false" />
+    <TrashDialog v-if="trashOpen" @close="trashOpen = false" @restored="sessions.load()" />
   </div>
 </template>
 

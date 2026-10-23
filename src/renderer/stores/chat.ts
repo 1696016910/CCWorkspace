@@ -21,7 +21,14 @@ export const useChatStore = defineStore('chat', () => {
 
   let unsubscribe: (() => void) | null = null
 
-  function listen(onDone: (msg: ChatMessage) => void): void {
+  interface Listeners {
+    /** 本轮结束，追加助手消息 */
+    onDone: (msg: ChatMessage) => void
+    /** 任意结束（完成 / 出错 / 中断），用于清理运行态 */
+    onFinish: (sessionId: string) => void
+  }
+
+  function listen(listeners: Listeners): void {
     if (unsubscribe) return
     unsubscribe = window.api.chat.onEvent((payload) => {
       const e = payload as ChatEvent
@@ -43,18 +50,21 @@ export const useChatStore = defineStore('chat', () => {
         case 'done':
           streaming.value = false
           if (e.usage) usage.value = e.usage
-          if (e.message) onDone(e.message)
+          if (e.message) listeners.onDone(e.message)
           streamText.value = ''
           streamTools.value = []
+          listeners.onFinish(e.sessionId)
           break
         case 'error':
           streaming.value = false
           error.value = typeof e.message === 'string' ? e.message : '发生未知错误'
           streamText.value = ''
           streamTools.value = []
+          listeners.onFinish(e.sessionId)
           break
         case 'interrupted':
           streaming.value = false
+          listeners.onFinish(e.sessionId)
           break
       }
     })

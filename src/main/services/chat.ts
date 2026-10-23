@@ -1,7 +1,7 @@
 import { BrowserWindow } from 'electron'
 import type { ChatMessage, ToolCall } from '../../shared/types'
 import { appendMessage } from './session'
-import { readModels, readRaw } from './claudeSettings'
+import { readModels, readPermissions, readRaw } from './claudeSettings'
 import { resolveClaudeBinary } from './binary'
 
 export type ChatEvent =
@@ -84,6 +84,13 @@ export async function send(
     const envOverrides = raw.env && typeof raw.env === 'object' ? raw.env : {}
     const models = await readModels()
     const model = models['ANTHROPIC_MODEL'] || undefined
+    // 权限模式来自设置页；无法识别的值回落到 acceptEdits
+    const perms = await readPermissions()
+    const mode = (
+      ['default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'] as const
+    ).includes(perms.defaultMode as never)
+      ? (perms.defaultMode as 'default' | 'acceptEdits' | 'plan' | 'dontAsk' | 'bypassPermissions')
+      : 'acceptEdits'
 
     const q = query({
       prompt: oneShot(text),
@@ -91,7 +98,7 @@ export async function send(
         cwd,
         env: { ...process.env, ...envOverrides } as Record<string, string>,
         model,
-        permissionMode: 'acceptEdits',
+        permissionMode: mode,
         // 打包后 SDK 默认会从 app.asar 里找二进制，需显式指向解包后的路径
         pathToClaudeCodeExecutable: resolveClaudeBinary(),
         // 'all' 表示全部 Skill；禁用列表通过显式白名单表达

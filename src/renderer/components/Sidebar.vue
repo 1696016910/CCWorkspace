@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSessionStore } from '@/stores/session'
 import type { SessionSummary } from '@shared/types'
 
-const emit = defineEmits<{ 'open-settings': [] }>()
+const emit = defineEmits<{ 'open-settings': []; 'open-trash': [] }>()
 
 const ws = useWorkspaceStore()
 const sessions = useSessionStore()
@@ -33,6 +33,36 @@ async function newChat(): Promise<void> {
     return
   }
   await sessions.create(ws.current?.id ?? null)
+}
+
+/* ── 重命名：Electron 不支持 window.prompt，改用内联输入 ── */
+const renamingId = ref<string | null>(null)
+const renameDraft = ref('')
+const renameInput = ref<HTMLInputElement | null>(null)
+
+function startRename(e: Event, id: string, currentTitle: string): void {
+  e.preventDefault()
+  e.stopPropagation()
+  renamingId.value = id
+  renameDraft.value = currentTitle
+  void nextTick(() => {
+    renameInput.value?.focus()
+    renameInput.value?.select()
+  })
+}
+
+async function commitRename(): Promise<void> {
+  const id = renamingId.value
+  if (!id) return
+  const trimmed = renameDraft.value.trim()
+  renamingId.value = null
+  if (!trimmed) return
+  await sessions.rename(id, trimmed)
+  await sessions.select(id)
+}
+
+function cancelRename(): void {
+  renamingId.value = null
 }
 
 function relativeTime(iso: string): string {
@@ -72,17 +102,37 @@ function relativeTime(iso: string): string {
         </div>
 
         <div v-show="!ws.isCollapsed(g.workspaceId)" class="ws-body">
-          <button
+          <div
             v-for="s in g.sessions"
             :key="s.id"
             class="chat"
             :class="{ on: sessions.currentId === s.id }"
             @click="sessions.select(s.id)"
+            @contextmenu="startRename($event, s.id, s.title)"
           >
-            <span class="cn">{{ s.title }}</span>
-            <span class="ctime">{{ relativeTime(s.updatedAt) }}</span>
-            <span class="cd" :class="s.running ? 'live' : 'idle'" />
-          </button>
+            <input
+              v-if="renamingId === s.id"
+              ref="renameInput"
+              v-model="renameDraft"
+              class="rename-input"
+              @click.stop
+              @keydown.enter.prevent="commitRename"
+              @keydown.esc.prevent="cancelRename"
+              @blur="commitRename"
+            />
+            <template v-else>
+              <span class="cn">{{ s.title }}</span>
+              <span class="ctime">{{ relativeTime(s.updatedAt) }}</span>
+              <button
+                class="edit-btn"
+                title="重命名"
+                @click.stop="startRename($event, s.id, s.title)"
+              >
+                ✎
+              </button>
+              <span class="cd" :class="sessions.isRunning(s.id) ? 'live' : 'idle'" />
+            </template>
+          </div>
           <p v-if="g.sessions.length === 0" class="ws-empty">暂无会话</p>
         </div>
       </div>
@@ -94,6 +144,12 @@ function relativeTime(iso: string): string {
     </div>
 
     <div class="side-foot">
+      <button class="foot-btn" @click="emit('open-trash')">
+        <svg viewBox="0 0 24 24">
+          <path d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13" />
+        </svg>
+        回收站
+      </button>
       <button class="foot-btn" @click="emit('open-settings')">
         <svg viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="2.6" />
@@ -298,6 +354,42 @@ function relativeTime(iso: string): string {
   flex: none;
 }
 
+.edit-btn {
+  display: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--t3);
+  font-size: 10px;
+  flex: none;
+  place-items: center;
+}
+
+.chat:hover .edit-btn {
+  display: grid;
+}
+
+.chat:hover .ctime {
+  display: none;
+}
+
+.edit-btn:hover {
+  background: #e0e0e3;
+  color: var(--t1);
+}
+
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 21px;
+  padding: 0 5px;
+  border: 1px solid var(--green);
+  border-radius: 4px;
+  background: #fff;
+  font-size: 12.5px;
+  color: var(--t1);
+}
+
 .cd {
   width: 5px;
   height: 5px;
@@ -340,7 +432,8 @@ function relativeTime(iso: string): string {
 .side-foot {
   flex: none;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 1px;
   padding: 8px 4px 2px;
   border-top: 1px solid var(--line);
   margin-top: 6px;

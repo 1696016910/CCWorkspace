@@ -8,6 +8,19 @@ export const useSessionStore = defineStore('session', () => {
   const messages = ref<ChatMessage[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+  /** 正在生成回复的会话，用于侧栏绿点 */
+  const runningIds = ref<Set<string>>(new Set())
+
+  function setRunning(id: string, running: boolean): void {
+    const next = new Set(runningIds.value)
+    if (running) next.add(id)
+    else next.delete(id)
+    runningIds.value = next
+  }
+
+  function isRunning(id: string): boolean {
+    return runningIds.value.has(id)
+  }
 
   const current = computed(() => list.value.find((s) => s.id === currentId.value) ?? null)
 
@@ -85,6 +98,7 @@ export const useSessionStore = defineStore('session', () => {
     messages,
     loading,
     error,
+    runningIds,
     byWorkspace,
     load,
     select,
@@ -92,6 +106,8 @@ export const useSessionStore = defineStore('session', () => {
     rename,
     remove,
     duplicate,
-    sessionsOf
+    sessionsOf,
+    setRunning,
+    isRunning
   }
 })

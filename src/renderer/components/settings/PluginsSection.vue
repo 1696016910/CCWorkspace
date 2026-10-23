@@ -6,6 +6,7 @@ const plugins = ref<PluginInfo[]>([])
 const loading = ref(true)
 const busy = ref<string | null>(null)
 const error = ref<string | null>(null)
+const newPluginId = ref('')
 
 async function load(): Promise<void> {
   loading.value = true
@@ -30,12 +31,38 @@ async function toggle(p: PluginInfo): Promise<void> {
   }
 }
 
+/* Electron 不支持 window.confirm，卸载用两次点击确认 */
+const confirmingId = ref<string | null>(null)
+
 async function uninstall(p: PluginInfo): Promise<void> {
-  if (!window.confirm(`确定卸载 ${p.name}？`)) return
+  if (confirmingId.value !== p.id) {
+    confirmingId.value = p.id
+    setTimeout(() => {
+      if (confirmingId.value === p.id) confirmingId.value = null
+    }, 4000)
+    return
+  }
+  confirmingId.value = null
   busy.value = p.id
   try {
     await window.api.plugin.uninstall(p.id)
     await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    busy.value = null
+  }
+}
+
+async function install(): Promise<void> {
+  const id = newPluginId.value.trim()
+  if (!id) return
+  busy.value = id
+  try {
+    await window.api.plugin.install(id)
+    newPluginId.value = ''
+    await load()
+    error.value = null
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -56,6 +83,17 @@ onMounted(load)
     <p class="st-subx">
       开关写入 <code>settings.json</code> 的 <code>enabledPlugins</code>。安装与卸载通过 <code>claude plugin</code> 执行。
     </p>
+
+    <div class="install-row">
+      <input
+        v-model="newPluginId"
+        placeholder="插件 ID，如 xxx@marketplace"
+        @keydown.enter="install"
+      />
+      <button class="st-btn pri" :disabled="!newPluginId.trim() || busy !== null" @click="install">
+        {{ busy ? '处理中…' : '安装' }}
+      </button>
+    </div>
 
     <p v-if="loading" class="hint">加载中…</p>
     <p v-else-if="error" class="st-err">{{ error }}</p>
@@ -85,7 +123,15 @@ onMounted(load)
             >
               <span class="toggle" :class="{ on: p.enabled }" />
             </button>
-            <button class="mini del" :disabled="busy === p.id" @click="uninstall(p)" title="卸载">✕</button>
+            <button
+              class="mini del"
+              :class="{ confirming: confirmingId === p.id }"
+              :disabled="busy === p.id"
+              @click="uninstall(p)"
+              :title="confirmingId === p.id ? '再次点击确认卸载' : '卸载'"
+            >
+              {{ confirmingId === p.id ? '确认' : '✕' }}
+            </button>
           </div>
         </div>
       </div>
@@ -97,6 +143,27 @@ onMounted(load)
 .hint {
   font-size: 12px;
   color: var(--t4);
+}
+
+.install-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.install-row input {
+  flex: 1;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line-3);
+  border-radius: var(--r);
+  background: #fcfcfd;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.install-row input:focus {
+  border-color: #bfc3c7;
 }
 
 .grid {
@@ -200,6 +267,14 @@ onMounted(load)
 
 .mini.del:hover {
   color: var(--red);
+}
+
+.mini.del.confirming {
+  width: auto;
+  padding: 0 6px;
+  background: #fbeaea;
+  color: var(--red);
+  font-size: 11px;
 }
 
 .mini:disabled {
