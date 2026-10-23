@@ -1,0 +1,26 @@
+# 依赖与构建产物
+node_modules/
+dist/
+dist-electron/
+out/
+release/
+*.tsbuildinfo
+
+# 临时文件（规则要求放 temp/ 且用完即删）
+temp/
+
+# 工具产生的中间文件
+.playwright-mcp/
+.DS_Store
+Thumbs.db
+*.log
+
+# 本地覆盖配置
+.claude/settings.local.json
+settings.json
+settings.local.json
+*.env
+.env*
+
+# 配置备份（可能含令牌）
+backups/

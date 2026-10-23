@@ -1,0 +1,32 @@
+{
+  "name": "claude-workbench",
+  "version": "0.1.0",
+  "description": "Claude Code CLI 的会话与配置管理外壳",
+  "main": "./out/main/index.js",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "vue-tsc --noEmit -p tsconfig.web.json && electron-vite build",
+    "preview": "electron-vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.309",
+    "dompurify": "^3.4.17",
+    "marked": "^18.1.1",
+    "pinia": "^4.1.0",
+    "vue": "^3.5.44"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.10",
+    "electron": "^45.0.0",
+    "electron-vite": "^6.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "vue-tsc": "^3.1.1"
+  }
+}
