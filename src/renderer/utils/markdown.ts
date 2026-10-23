@@ -8,6 +8,35 @@ import createDOMPurify from 'dompurify'
  */
 const purifier = createDOMPurify(window as unknown as Parameters<typeof createDOMPurify>[0])
 
+/** 提取代码块语言标签，用于展示在复制栏左侧 */
+function languageOf(className: string | undefined): string {
+  if (!className) return ''
+  const m = /language-([\w+#-]+)/.exec(className)
+  return m?.[1] ?? ''
+}
+
+/**
+ * 给每个 <pre> 包一层带语言标签与复制按钮的容器。
+ *
+ * Markdown 渲染是纯 HTML 字符串，无法直接挂 Vue 事件，因此复制按钮
+ * 通过 `data-copy` 标记 + 事件委托实现（见 MessageItem）。
+ */
+function decorateCodeBlocks(html: string): string {
+  return html.replace(/<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g, (_all, attrs, body) => {
+    const langMatch = /class="([^"]*)"/.exec(attrs)
+    const lang = languageOf(langMatch?.[1]) || 'text'
+    return (
+      '<div class="code-block">' +
+      '<div class="code-head">' +
+      `<span class="code-lang">${lang}</span>` +
+      '<button class="code-copy" data-copy type="button">复制</button>' +
+      '</div>' +
+      `<pre><code${attrs}>${body}</code></pre>` +
+      '</div>'
+    )
+  })
+}
+
 /**
  * 把模型输出的 Markdown 渲染成安全 HTML。
  *
@@ -28,8 +57,11 @@ export function renderMarkdown(source: string | null | undefined): string {
     raw = source.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c] ?? c)
   }
 
-  return purifier.sanitize(raw, {
-    ADD_ATTR: ['target', 'data-file'],
+  const decorated = decorateCodeBlocks(raw)
+
+  return purifier.sanitize(decorated, {
+    ADD_ATTR: ['target', 'data-file', 'data-copy', 'type'],
+    ADD_TAGS: ['button'],
     FORBID_TAGS: ['style', 'script', 'iframe', 'object', 'embed'],
     FORBID_ATTR: ['onerror', 'onload', 'onclick']
   })

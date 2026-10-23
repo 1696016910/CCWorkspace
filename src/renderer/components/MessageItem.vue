@@ -8,6 +8,23 @@ const props = defineProps<{ message: ChatMessage }>()
 const expanded = ref(false)
 const copied = ref(false)
 
+/** 代码块复制按钮的事件委托（HTML 由 markdown 渲染生成） */
+async function onBodyClick(e: MouseEvent): Promise<void> {
+  const target = e.target as HTMLElement
+  if (!target.matches('[data-copy]')) return
+  const block = target.closest('.code-block')
+  const code = block?.querySelector('code')?.textContent ?? ''
+  if (!code) return
+  try {
+    await navigator.clipboard.writeText(code)
+    const prev = target.textContent
+    target.textContent = '已复制'
+    setTimeout(() => (target.textContent = prev), 1400)
+  } catch {
+    // 剪贴板不可用时忽略
+  }
+}
+
 async function copyText(): Promise<void> {
   try {
     await navigator.clipboard.writeText(props.message.text)
@@ -29,12 +46,11 @@ function time(iso?: string): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-async function openFile(path: string): Promise<void> {
-  try {
-    await window.api.file.open(path)
-  } catch {
-    // 文件不存在时忽略，避免打断阅读
-  }
+const emit = defineEmits<{ 'open-file': [path: string] }>()
+
+/** 文件在应用内打开，不交给系统默认程序 */
+function openFile(path: string): void {
+  emit('open-file', path)
 }
 </script>
 
@@ -69,7 +85,7 @@ async function openFile(path: string): Promise<void> {
     </div>
 
     <!-- eslint-disable-next-line vue/no-v-html -- 已经过 DOMPurify 净化 -->
-    <div class="ai-text md" v-html="html" />
+    <div class="ai-text md" v-html="html" @click="onBodyClick" />
 
     <div class="msg-actions">
       <button class="act" :title="copied ? '已复制' : '复制'" @click="copyText">
@@ -382,6 +398,47 @@ async function openFile(path: string): Promise<void> {
   border: none;
   border-top: 1px solid var(--line);
   margin: 16px 0;
+}
+
+/* 代码块：语言标签 + 复制按钮 */
+.ai-text :deep(.code-block) {
+  margin: 0 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-soft);
+}
+
+.ai-text :deep(.code-head) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.ai-text :deep(.code-lang) {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--t4);
+  text-transform: uppercase;
+}
+
+.ai-text :deep(.code-copy) {
+  margin-left: auto;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  color: var(--t3);
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+}
+
+.ai-text :deep(.code-copy:hover) {
+  color: var(--t1);
+  border-color: var(--line-3);
 }
 
 /* 文件链接 */

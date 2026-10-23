@@ -7,12 +7,14 @@ import type { ChatMessage, ContextUsageDetail, SlashCommandInfo } from '@shared/
 import MessageItem from './MessageItem.vue'
 import { renderMarkdown } from '@/utils/markdown'
 import ContextPopover from './ContextPopover.vue'
+import FileViewer from './FileViewer.vue'
 import { useToast } from '@/composables/useToast'
 
 const sessions = useSessionStore()
 const ws = useWorkspaceStore()
 const chat = useChatStore()
 const toast = useToast()
+const viewingFile = ref<string | null>(null)
 
 const input = ref('')
 const thread = ref<HTMLElement | null>(null)
@@ -304,6 +306,22 @@ async function send(): Promise<void> {
   if (!ok) toast.error(chat.error ?? '发送失败')
 }
 
+/** 流式文本里的代码块复制 */
+async function onStreamClick(e: MouseEvent): Promise<void> {
+  const target = e.target as HTMLElement
+  if (!target.matches('[data-copy]')) return
+  const code = target.closest('.code-block')?.querySelector('code')?.textContent ?? ''
+  if (!code) return
+  try {
+    await navigator.clipboard.writeText(code)
+    const prev = target.textContent
+    target.textContent = '已复制'
+    setTimeout(() => (target.textContent = prev), 1400)
+  } catch {
+    // 忽略
+  }
+}
+
 async function stop(): Promise<void> {
   await chat.stop()
 }
@@ -330,7 +348,12 @@ async function stop(): Promise<void> {
 
     <div v-if="current" ref="thread" class="thread">
       <div class="thread-inner">
-        <MessageItem v-for="m in sessions.messages" :key="m.id" :message="m" />
+        <MessageItem
+          v-for="m in sessions.messages"
+          :key="m.id"
+          :message="m"
+          @open-file="viewingFile = $event"
+        />
 
         <div v-if="chat.streaming && chat.streamingSessionId === current?.id" class="msg-ai">
           <div class="ai-role"><span class="who">Claude</span></div>
@@ -341,7 +364,12 @@ async function stop(): Promise<void> {
               <span class="sarg">{{ t.target }}</span>
             </div>
           </div>
-          <div v-if="chat.streamText" class="ai-text md" v-html="renderMarkdown(chat.streamText)" />
+          <div
+            v-if="chat.streamText"
+            class="ai-text md"
+            v-html="renderMarkdown(chat.streamText)"
+            @click="onStreamClick"
+          />
           <div v-else class="thinking">
             <span class="dot" /><span class="dot" /><span class="dot" />
             <span class="thinking-label">正在思考</span>
@@ -429,6 +457,8 @@ async function stop(): Promise<void> {
       </div>
       <div class="hint">Enter 发送 · Shift + Enter 换行 · / 调用命令 · 可直接粘贴图片</div>
     </div>
+
+    <FileViewer v-if="viewingFile" :path="viewingFile" @close="viewingFile = null" />
 
     <ContextPopover
       v-if="ctxOpen"

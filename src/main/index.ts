@@ -101,6 +101,53 @@ function registerIpc(): void {
   })
 
   /**
+   * 读取文件内容供应用内预览。
+   * 只读不写，并对体积与二进制做限制，避免把大文件读进渲染进程。
+   */
+  handle('file:read', async (path: string) => {
+    const { readFile, stat } = await import('node:fs/promises')
+    const { extname, basename } = await import('node:path')
+
+    let info
+    try {
+      info = await stat(path)
+    } catch {
+      throw new Error('文件不存在或无法访问')
+    }
+    if (!info.isFile()) throw new Error('该路径不是文件')
+
+    const MAX = 2 * 1024 * 1024
+    if (info.size > MAX) {
+      throw new Error(`文件过大（${Math.round(info.size / 1024)} KB），暂不支持预览`)
+    }
+
+    const ext = extname(path).toLowerCase()
+    const binaryExts = new Set([
+      '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp',
+      '.pdf', '.zip', '.gz', '.7z', '.rar', '.exe', '.dll', '.so',
+      '.woff', '.woff2', '.ttf', '.mp3', '.mp4', '.mov'
+    ])
+    if (binaryExts.has(ext)) {
+      throw new Error('这是二进制文件，无法以文本方式预览')
+    }
+
+    let content: string
+    try {
+      content = await readFile(path, 'utf-8')
+    } catch {
+      throw new Error('读取失败：文件可能是二进制或已损坏')
+    }
+
+    return {
+      path,
+      name: basename(path),
+      ext,
+      size: info.size,
+      content
+    }
+  })
+
+  /**
    * 保存粘贴进来的图片或文件到应用数据目录。
    * 渲染进程只有 base64，落盘后才能把路径交给模型。
    */

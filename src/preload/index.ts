@@ -50,7 +50,11 @@ const api = {
   file: {
     open: (path: string): Promise<void> => unwrap(ipcRenderer.invoke('file:open', path)),
     savePaste: (name: string, base64: string): Promise<string> =>
-      unwrap(ipcRenderer.invoke('file:savePaste', name, base64))
+      unwrap(ipcRenderer.invoke('file:savePaste', name, base64)),
+    read: (
+      path: string
+    ): Promise<{ path: string; name: string; ext: string; size: number; content: string }> =>
+      unwrap(ipcRenderer.invoke('file:read', path))
   },
 
   workspace: {
