@@ -6,6 +6,9 @@ export const useSessionStore = defineStore('session', () => {
   const list = ref<SessionSummary[]>([])
   const currentId = ref<string | null>(null)
   const messages = ref<ChatMessage[]>([])
+  /** 该会话的消息总数，用于判断是否还有更早的历史 */
+  const messageTotal = ref(0)
+  const loadingEarlier = ref(false)
   const loading = ref(false)
   const error = ref<string | null>(null)
   /** 正在生成回复的会话，用于侧栏绿点 */
@@ -61,12 +64,38 @@ export const useSessionStore = defineStore('session', () => {
   /** 防抖令牌：快速切换会话时，只有最后一次请求的结果会写入 */
   let selectToken = 0
 
+  /** 首屏只取最近 80 条，避免长会话一次性渲染 */
+  const PAGE_SIZE = 80
+
   async function select(id: string): Promise<void> {
     const token = ++selectToken
     currentId.value = id
-    const loaded = await window.api.session.messages(id)
+    const [loaded, total] = await Promise.all([
+      window.api.session.messages(id, PAGE_SIZE),
+      window.api.session.messageCount(id)
+    ])
     if (token !== selectToken) return
     messages.value = loaded
+    messageTotal.value = total
+  }
+
+  /** 加载更早的一页，追加到列表头部 */
+  async function loadEarlier(): Promise<void> {
+    const id = currentId.value
+    if (!id || loadingEarlier.value) return
+    if (messages.value.length >= messageTotal.value) return
+
+    loadingEarlier.value = true
+    try {
+      const all = await window.api.session.messages(id)
+      // 一次取回全部再截取，数据量在本地可控；避免复杂游标
+      const already = messages.value.length
+      messages.value = all.slice(Math.max(0, all.length - already - PAGE_SIZE), all.length - already).concat(
+        messages.value
+      )
+    } finally {
+      loadingEarlier.value = false
+    }
   }
 
   async function create(workspaceId: string | null): Promise<SessionSummary | null> {
@@ -106,6 +135,8 @@ export const useSessionStore = defineStore('session', () => {
     currentId,
     current,
     messages,
+    messageTotal,
+    loadingEarlier,
     loading,
     error,
     runningIds,
@@ -113,6 +144,7 @@ export const useSessionStore = defineStore('session', () => {
     byWorkspace,
     load,
     select,
+    loadEarlier,
     create,
     rename,
     remove,

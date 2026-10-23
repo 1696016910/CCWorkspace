@@ -203,18 +203,44 @@ function parseTools(raw: string | null): ChatMessage['tools'] {
 }
 
 /** 读取某会话的全部消息 */
-export function listMessages(sessionId: string): ChatMessage[] {
-  const rows = getDb()
-    .prepare('SELECT id, role, content, tools, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC')
-    .all(sessionId) as unknown as MessageRow[]
+export function listMessages(sessionId: string, limit?: number): ChatMessage[] {
+  const db = getDb()
 
-  return rows.map((r) => ({
+  if (!limit || limit <= 0) {
+    const rows = db
+      .prepare(
+        'SELECT id, role, content, tools, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC'
+      )
+      .all(sessionId) as unknown as MessageRow[]
+    return rows.map(toChatMessage)
+  }
+
+  // 分页：先取最近 N 条，再反转为时间正序
+  const rows = db
+    .prepare(
+      `SELECT id, role, content, tools, created_at FROM messages
+        WHERE session_id = ? ORDER BY created_at DESC LIMIT ?`
+    )
+    .all(sessionId, limit) as unknown as MessageRow[]
+  return rows.reverse().map(toChatMessage)
+}
+
+function toChatMessage(r: MessageRow): ChatMessage {
+  return {
     id: r.id,
     role: r.role === 'assistant' ? 'assistant' : 'user',
     text: r.content,
     tools: parseTools(r.tools),
     timestamp: r.created_at
-  }))
+  }
+}
+
+/** 会话消息总数，用于判断是否还有更早的历史 */
+export function countMessages(sessionId: string): number {
+  const row = getDb()
+    .prepare('SELECT COUNT(*) AS n FROM messages WHERE session_id = ?')
+    .get(sessionId) as { n: number }
+  return row.n
 }
 
 /** 追加一条消息；首条用户消息会顺带补上自动标题 */

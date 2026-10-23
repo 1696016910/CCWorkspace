@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { initDb, closeDb } from './db'
 import {
   addWorkspace,
@@ -17,6 +18,7 @@ import {
   duplicateSession,
   listDeletedSessions,
   listMessages,
+  countMessages,
   listSessions,
   renameSession,
   restoreSession,
@@ -46,10 +48,59 @@ import type { EnvEntry } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
 
+/**
+ * 记住窗口位置与大小。
+ * 存在 userData 下的独立文件里，避免与数据库耦合；
+ * 读取失败时回落到默认尺寸，不影响启动。
+ */
+function windowStatePath(): string {
+  return join(app.getPath('userData'), 'window-state.json')
+}
+
+interface WindowState {
+  x?: number
+  y?: number
+  width: number
+  height: number
+  maximized?: boolean
+}
+
+function readWindowState(): WindowState {
+  const fallback: WindowState = { width: 1440, height: 900 }
+  try {
+    const raw = readFileSync(windowStatePath(), 'utf-8')
+    const parsed = JSON.parse(raw) as WindowState
+    if (typeof parsed.width !== 'number' || typeof parsed.height !== 'number') return fallback
+    return parsed
+  } catch {
+    return fallback
+  }
+}
+
+function saveWindowState(): void {
+  if (!mainWindow) return
+  try {
+    const maximized = mainWindow.isMaximized()
+    // 最大化时记录还原后的尺寸，避免下次启动被钳在最大化状态
+    const bounds = maximized ? mainWindow.getNormalBounds() : mainWindow.getBounds()
+    writeFileSync(
+      windowStatePath(),
+      JSON.stringify({ ...bounds, maximized }, null, 2),
+      'utf-8'
+    )
+  } catch {
+    // 写失败不影响退出
+  }
+}
+
 function createWindow(): void {
+  const state = readWindowState()
+
   mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 900,
+    x: state.x,
+    y: state.y,
+    width: state.width,
+    height: state.height,
     minWidth: 960,
     minHeight: 600,
     show: false,
@@ -64,7 +115,18 @@ function createWindow(): void {
     }
   })
 
+  if (state.maximized) mainWindow.maximize()
+
   mainWindow.on('ready-to-show', () => mainWindow?.show())
+
+  let saveTimer: NodeJS.Timeout | null = null
+  const scheduleSave = (): void => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(saveWindowState, 400)
+  }
+  mainWindow.on('resize', scheduleSave)
+  mainWindow.on('move', scheduleSave)
+  mainWindow.on('close', saveWindowState)
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
@@ -131,11 +193,29 @@ function registerIpc(): void {
       throw new Error('这是二进制文件，无法以文本方式预览')
     }
 
+    // 先按字节读入，再判断编码：Windows 上的中文文档常是 GBK
+    let buf: Buffer
+    try {
+      buf = await readFile(path)
+    } catch {
+      throw new Error('读取失败：文件无法访问')
+    }
+
+    // UTF-8 BOM
+    if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+      buf = buf.subarray(3)
+    }
+
     let content: string
     try {
-      content = await readFile(path, 'utf-8')
+      content = new TextDecoder('utf-8', { fatal: true }).decode(buf)
     } catch {
-      throw new Error('读取失败：文件可能是二进制或已损坏')
+      // UTF-8 解不开时按 GBK 处理（中文 Windows 的常见编码）
+      try {
+        content = new TextDecoder('gbk').decode(buf)
+      } catch {
+        throw new Error('读取失败：文件编码无法识别')
+      }
     }
 
     return {
@@ -211,7 +291,8 @@ function registerIpc(): void {
   /* 会话 */
   handle('session:list', () => listSessions())
   handle('session:listDeleted', () => listDeletedSessions())
-  handle('session:messages', (id: string) => listMessages(id))
+  handle('session:messages', (id: string, limit?: number) => listMessages(id, limit))
+  handle('session:messageCount', (id: string) => countMessages(id))
   handle('session:create', (workspaceId: string | null) => createSession(workspaceId))
   handle('session:rename', (id: string, title: string) => renameSession(id, title))
   handle('session:remove', (id: string) => deleteSession(id))

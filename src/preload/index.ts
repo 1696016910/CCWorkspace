@@ -71,7 +71,10 @@ const api = {
   session: {
     list: (): Promise<SessionSummary[]> => unwrap(ipcRenderer.invoke('session:list')),
     listDeleted: (): Promise<SessionSummary[]> => unwrap(ipcRenderer.invoke('session:listDeleted')),
-    messages: (id: string): Promise<ChatMessage[]> => unwrap(ipcRenderer.invoke('session:messages', id)),
+    messages: (id: string, limit?: number): Promise<ChatMessage[]> =>
+      unwrap(ipcRenderer.invoke('session:messages', id, limit)),
+    messageCount: (id: string): Promise<number> =>
+      unwrap(ipcRenderer.invoke('session:messageCount', id)),
     create: (workspaceId: string | null): Promise<SessionSummary> =>
       unwrap(ipcRenderer.invoke('session:create', workspaceId)),
     rename: (id: string, title: string): Promise<void> =>

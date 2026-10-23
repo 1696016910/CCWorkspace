@@ -1,5 +1,6 @@
 import { marked } from 'marked'
 import createDOMPurify from 'dompurify'
+import hljs from 'highlight.js/lib/common'
 
 /**
  * dompurify 的默认导出是一个工厂函数：浏览器里需要传入 window
@@ -25,13 +26,31 @@ function decorateCodeBlocks(html: string): string {
   return html.replace(/<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g, (_all, attrs, body) => {
     const langMatch = /class="([^"]*)"/.exec(attrs)
     const lang = languageOf(langMatch?.[1]) || 'text'
+
+    // 高亮：已知语言才着色，未知语言保持原文，避免报错
+    let highlighted = body
+    try {
+      const decoded = body
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+      const language = hljs.getLanguage(lang) ? lang : null
+      // highlight.js 返回的就是安全 HTML（内容已转义、只含 span 标签），
+      // 不能再整体转义，否则会把标签本身显示成文本
+      const out = language ? hljs.highlight(decoded, { language }).value : null
+      if (out) highlighted = out
+    } catch {
+      // 高亮失败就用原始转义内容
+    }
+
     return (
       '<div class="code-block">' +
       '<div class="code-head">' +
       `<span class="code-lang">${lang}</span>` +
       '<button class="code-copy" data-copy type="button">复制</button>' +
       '</div>' +
-      `<pre><code${attrs}>${body}</code></pre>` +
+      `<pre><code${attrs}>${highlighted}</code></pre>` +
       '</div>'
     )
   })
@@ -60,8 +79,8 @@ export function renderMarkdown(source: string | null | undefined): string {
   const decorated = decorateCodeBlocks(raw)
 
   return purifier.sanitize(decorated, {
-    ADD_ATTR: ['target', 'data-file', 'data-copy', 'type'],
-    ADD_TAGS: ['button'],
+    ADD_ATTR: ['target', 'data-file', 'data-copy', 'type', 'class'],
+    ADD_TAGS: ['button', 'span'],
     FORBID_TAGS: ['style', 'script', 'iframe', 'object', 'embed'],
     FORBID_ATTR: ['onerror', 'onload', 'onclick']
   })

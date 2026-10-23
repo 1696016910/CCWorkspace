@@ -35,6 +35,16 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
 })
+
+/**
+ * 关闭设置时同步刷新主界面数据。
+ * 设置页可能增删了工作区、改了主题，主界面需要重新读取。
+ */
+async function closeSettings(): Promise<void> {
+  settingsOpen.value = false
+  await Promise.all([ws.load(), sessions.load()])
+  document.documentElement.dataset.theme = await window.api.theme.get()
+}
 </script>
 
 <template>
@@ -46,7 +56,7 @@ onUnmounted(() => {
       </ErrorBoundary>
     </div>
 
-    <SettingsPage v-if="settingsOpen" @close="settingsOpen = false" />
+    <SettingsPage v-if="settingsOpen" @close="closeSettings" />
     <TrashDialog v-if="trashOpen" @close="trashOpen = false" @restored="sessions.load()" />
     <ToastHost />
   </div>

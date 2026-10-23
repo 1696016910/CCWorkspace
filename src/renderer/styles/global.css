@@ -337,8 +337,8 @@ textarea {
 
   --t1: #e8e8ec;
   --t2: #a8a8b2;
-  --t3: #75757f;
-  --t4: #55555e;
+  --t3: #9a9aa4;
+  --t4: #80808c;
 
   --green: #3f7d5c;
   --green-h: #487f61;
@@ -443,4 +443,85 @@ button:active:not(:disabled) {
 /* 滚动条在暗色下更和谐 */
 :root[data-theme='dark'] ::-webkit-scrollbar-thumb {
   background: #3a3a42;
+}
+
+/* ── 代码语法高亮（highlight.js token） ── */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal {
+  color: #a56cb8;
+}
+
+.hljs-string,
+.hljs-attr,
+.hljs-template-tag {
+  color: #7a9c4f;
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet {
+  color: #c07a45;
+}
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+  color: #4a7fb5;
+}
+
+.hljs-type,
+.hljs-built_in,
+.hljs-class .hljs-title {
+  color: #3f8c8c;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: #8a8a96;
+  font-style: italic;
+}
+
+.hljs-variable,
+.hljs-params {
+  color: #b06e6e;
+}
+
+.hljs-meta,
+.hljs-tag {
+  color: #8a7a5a;
+}
+
+:root[data-theme='dark'] .hljs-keyword,
+:root[data-theme='dark'] .hljs-selector-tag,
+:root[data-theme='dark'] .hljs-literal {
+  color: #c9a0e0;
+}
+
+:root[data-theme='dark'] .hljs-string,
+:root[data-theme='dark'] .hljs-attr {
+  color: #a3c27a;
+}
+
+:root[data-theme='dark'] .hljs-number {
+  color: #e0a173;
+}
+
+:root[data-theme='dark'] .hljs-title,
+:root[data-theme='dark'] .hljs-title.function_ {
+  color: #7fb0e0;
+}
+
+:root[data-theme='dark'] .hljs-type,
+:root[data-theme='dark'] .hljs-built_in {
+  color: #6fc0c0;
+}
+
+:root[data-theme='dark'] .hljs-comment {
+  color: #7a7a86;
+}
+
+:root[data-theme='dark'] .hljs-variable,
+:root[data-theme='dark'] .hljs-params {
+  color: #d98f8f;
 }

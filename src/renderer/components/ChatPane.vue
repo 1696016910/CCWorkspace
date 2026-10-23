@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useChatStore } from '@/stores/chat'
@@ -101,9 +101,20 @@ async function doCompact(): Promise<void> {
 }
 
 /* ── 消息 ── */
-async function scrollToBottom(): Promise<void> {
+/**
+ * 滚动到底部。
+ *
+ * 流式输出时每次增量都调用，必须用 instant 且只在用户已接近底部时跟随，
+ * 否则既卡顿又会打断用户向上翻阅历史。
+ */
+async function scrollToBottom(smooth = false): Promise<void> {
   await nextTick()
-  thread.value?.scrollTo({ top: thread.value.scrollHeight, behavior: 'smooth' })
+  const el = thread.value
+  if (!el) return
+  const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+  // 用户主动上翻超过一屏时不再强制跟随
+  if (distance > el.clientHeight * 1.2) return
+  el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
 }
 
 function onMessageSaved(msg: ChatMessage): void {
@@ -120,6 +131,10 @@ async function refreshCtxFromCache(): Promise<void> {
   const d = await window.api.context.usage(current.value.id)
   if (d) ctxDetail.value = d
 }
+
+onUnmounted(() => {
+  if (ctxPollTimer) clearTimeout(ctxPollTimer)
+})
 
 onMounted(() => {
   chat.listen({
@@ -147,13 +162,13 @@ watch(
       })
     }
     await nextTick()
-    scrollToBottom()
+    void scrollToBottom(true)
   }
 )
 
 watch(
   () => chat.streamText,
-  () => void scrollToBottom()
+  () => void scrollToBottom(false)
 )
 
 /* ── 输入框与命令面板 ── */
@@ -322,6 +337,16 @@ async function onStreamClick(e: MouseEvent): Promise<void> {
   }
 }
 
+/** 加载更早的消息，并保持滚动位置不跳 */
+async function loadEarlier(): Promise<void> {
+  const el = thread.value
+  const before = el?.scrollHeight ?? 0
+  const fromTop = el?.scrollTop ?? 0
+  await sessions.loadEarlier()
+  await nextTick()
+  if (el) el.scrollTop = el.scrollHeight - before + fromTop
+}
+
 async function stop(): Promise<void> {
   await chat.stop()
 }
@@ -348,6 +373,12 @@ async function stop(): Promise<void> {
 
     <div v-if="current" ref="thread" class="thread">
       <div class="thread-inner">
+        <div v-if="sessions.messages.length < sessions.messageTotal" class="load-earlier">
+          <button :disabled="sessions.loadingEarlier" @click="loadEarlier">
+            {{ sessions.loadingEarlier ? '加载中…' : `加载更早的消息 · 还有 ${sessions.messageTotal - sessions.messages.length} 条` }}
+          </button>
+        </div>
+
         <MessageItem
           v-for="m in sessions.messages"
           :key="m.id"
@@ -546,6 +577,27 @@ async function stop(): Promise<void> {
   max-width: 720px;
   margin: 0 auto;
   padding: 0 28px;
+}
+
+.load-earlier {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+
+.load-earlier button {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 13px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  font-size: 11.5px;
+  color: var(--t3);
+}
+
+.load-earlier button:hover:not(:disabled) {
+  color: var(--t1);
+  border-color: var(--line-3);
 }
 
 .msg-ai {
