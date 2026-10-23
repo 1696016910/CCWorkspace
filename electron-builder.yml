@@ -1,0 +1,25 @@
+appId: com.jianzhou.claude-workbench
+productName: Claude 工作台
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+asarUnpack:
+  - node_modules/@anthropic-ai/claude-agent-sdk-*/**/*
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+mac:
+  target: [dmg]
+  category: public.app-category.developer-tools
+linux:
+  target: [AppImage]
+  category: Development

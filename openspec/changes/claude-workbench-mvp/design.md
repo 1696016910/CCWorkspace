@@ -49,36 +49,33 @@
 
 **代价**：安装包约 130MB，常驻内存约 300MB。对单人本机工具可接受。
 
-### 决策 2：不建会话数据库，只读 Claude 的 jsonl
+### 决策 2：会话由应用自己持有，使用 SQLite 存储
 
-**选择**：会话列表由扫描 `~/.claude/projects/**/*.jsonl` 得出，工作区归属读记录中的 `cwd`。
+**选择**：应用在 `userData/workbench.db` 维护自己的 `workspaces` / `sessions` / `messages` 三张表。会话与消息完全由应用产生和读取，不读 `~/.claude/projects/`。
 
-**理由**：如果应用另存一份会话表，就要解决双写一致性问题——用户在终端里新建的会话应用不知道，应用里删的会话终端还在用。Claude 已经在写这份数据，应用再写一份只会制造两个真相。
+**理由**：这个应用的目的是把"日常事务性工作"与"开发用的 Claude Code"分开。若共用同一份会话数据，两边会互相污染——应用里冒出一堆开发会话，开发时又会被日常任务干扰。数据归属清楚了，隔离才是真的。
 
 **放弃的方案**：
 
-- 应用自建 SQLite 会话库：需要监听文件变化并双向同步，复杂度远高于收益。
-- 用目录名反解码路径：Claude 的编码规则把路径分隔符替换为 `-`，反解码有歧义（`a-b` 无法区分是 `a/b` 还是 `a-b`）。记录里的 `cwd` 是权威值。
+- 读 Claude 的 jsonl：无法实现隔离，且 jsonl 是私有格式，随版本漂移。
+- 用 JSON 文件存全部消息：消息量会随对话增长到几 MB，每次读写整文件不划算，也无法按会话增量查询。
 
-**代价**：每次刷新要扫目录。实测本机最坏情况 20MB 的会话文件，只扫头部取元信息可控；完整历史按需解析。
+**代价**：需要自己设计表结构与迁移。但存储规模小、schema 简单，成本可控。
 
-### 决策 3：jsonl 解析采用白名单
+### 决策 3：用 `node:sqlite`，不引入原生依赖
 
-**选择**：只解析 `type` 为 `user` / `assistant` 的记录，其余全部跳过；单条解析失败只跳过该条。
+**选择**：使用 Electron 内置 Node 提供的 `node:sqlite`（`DatabaseSync`）。
 
-**理由**：实测同一份文件里出现过 `queue-operation`、`atis-latch`、`api-request-shape`、`api-request-blob`、`cost-state`、`system/stop_hook_summary` 等内部类型，这些不在任何公开文档里，未来还会变。白名单策略让未知类型天然安全。
+**理由**：已在本机 Electron 45 运行时实测可用。它随 Node 内置，不需要 `better-sqlite3` 这类需要针对 Electron ABI 重编译的原生模块——打包与跨平台都不会因为编译失败而卡住。
 
-**放弃的方案**：黑名单（排除已知无用类型）——新增的内部类型会因此被误当作用户消息渲染。
+**放弃的方案**：
 
-### 决策 4：应用状态用一个 JSON 文件
+- `better-sqlite3`：功能更全，但要 `electron-rebuild`，Windows 还需要 VS Build Tools，是打包阶段最常见的翻车点。
+- `sql.js`：纯 WASM，无需编译，但每次都要手动持久化整库，失去事务与并发优势。
 
-**选择**：`app.getPath('userData')/config.json` 存工作区列表、默认工作区、会话别名、上次打开的会话。
+**代价**：`node:sqlite` 的 API 比 better-sqlite3 朴素（同步 API、无链式查询），复杂查询要自己拼 SQL。对本项目的规模足够。
 
-**理由**：数据量是几十条记录级别，SQLite 带来的迁移与打包成本（原生模块）不值。JSON 可读、可手工修、可用 git 备份。
-
-**放弃的方案**：SQLite——引入原生模块，破坏"零原生依赖"这个属性。
-
-**代价**：并发写需要自己做串行化（单进程 + 原子写足够）。
+**风险**：`node:sqlite` 在旧版 Electron 上不可用。已在 `electron` 版本上锁 45，并在打包验证任务中检查。
 
 ### 决策 5：配置写入采用备份 + 原子写 + mtime 比对
 
@@ -126,37 +123,53 @@
 
 **选择**：
 
-- Skill 开关存应用自己的 `config.json`，通过 SDK 的 `skills` 选项传给会话。
+- Skill 开关存应用自己的数据库，通过 SDK 的 `skills` 选项传给会话。
 - 插件开关写 `settings.json` 的 `enabledPlugins`，由 CLI 自身读取。
 
 **理由**：插件是 CLI 的一等公民，有自己的启用机制，绕开它会与 CLI 行为不一致。Skill 没有等价的 CLI 开关，SDK 的 `skills` 选项是官方支持的控制点。
 
 **放弃的方案**：两者都写 `settings.json`——Skill 没有对应字段，写进去无效。
 
+### 决策 10：数据库表结构与迁移
+
+**选择**：三张表 + 一张元信息表，版本号存 `meta.schema_version`。启动时若版本低于当前，按顺序执行迁移脚本。
+
+```sql
+workspaces(id TEXT PK, path TEXT UNIQUE, name TEXT, created_at TEXT)
+sessions(id TEXT PK, workspace_id TEXT, title TEXT, auto_title INTEGER,
+         created_at TEXT, updated_at TEXT, deleted_at TEXT)
+messages(id TEXT PK, session_id TEXT, role TEXT, content TEXT,
+         tools TEXT, created_at TEXT)
+meta(key TEXT PK, value TEXT)
+```
+
+**理由**：会话标题需要区分"用户命名"与"自动生成"——`auto_title = 1` 时首条消息到达才写标题，之后不再覆盖。
+
+**放弃的方案**：把消息塞进 sessions 的一列 JSON——查询、分页、单条更新都会变复杂。
+
 ## Risks / Trade-offs
 
 | 风险 | 缓解 |
 |---|---|
-| jsonl 格式随 Claude 版本变化 | 白名单解析；未知记录跳过；单条失败不影响列表；在会话详情记录 `claude_code_version` 便于回溯 |
+| `node:sqlite` 在旧版 Electron 不可用 | 锁定 Electron 45；打包验证任务中显式检查 |
+| 数据库文件损坏 | 启动时 `PRAGMA integrity_check`，失败则以空库启动并备份损坏文件 |
 | Agent SDK 版本与本地 CLI 版本漂移 | 锁定 SDK 版本；升版本前跑一次端到端验证 |
 | 第三方中转不兼容工具事件流 | 首屏提供连接体检；错误显式展示而非吞掉 |
-| 同一会话被应用与终端同时打开 | 打开前用 `claude agents --json` 检测占用，提示并提供"复制一份继续" |
 | 与 CLI 并发写 `settings.json` | 备份 + 原子写 + mtime 比对 |
 | 上下文成本失控（一次空对话可达 3.7 万 token） | 输入框常驻用量显示；设置页展示启用中的 Skill/插件数量 |
 | 打包后找不到 `claude` 可执行文件 | 用 SDK 随包分发的平台二进制，不依赖用户 PATH |
 | 范围回弹（又想加编辑器） | `proposal.md` 的 Capabilities 与"不做"清单为边界，扩范围先改 proposal |
-| Electron 内存占用高于原生应用 | 单窗口、单活跃会话、列表虚拟滚动（会话数少时可省略） |
+| Electron 内存占用高于原生应用 | 单窗口、单活跃会话 |
 
 ## Migration Plan
 
-全新项目，无迁移。首次启动时：
+全新项目，无历史数据迁移。首次启动时：
 
-1. 读取 `~/.claude.json` 的 `projects`，过滤已不存在的目录，作为初始工作区列表
-2. 若列表为空，进入空状态引导用户添加工作区
-3. 扫描 `~/.claude/projects/` 建立会话索引
-4. 不做任何写入——首次启动是纯只读的
+1. 创建 `userData/workbench.db`，建表并写入 `schema_version`
+2. 工作区与会话均为空，界面进入引导状态
+3. 不读取任何外部数据，不写 `~/.claude` 下的任何文件
 
-回滚策略：应用自身只写 `userData/config.json` 与（用户主动保存时的）`settings.json`。前者删除即恢复初始状态，后者有 `backups/` 可还原。
+回滚策略：删除 `workbench.db` 即恢复初始状态。`settings.json` 的修改有 `backups/` 可还原。
 
 ## Open Questions
 

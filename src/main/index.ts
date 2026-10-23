@@ -1,0 +1,188 @@
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { join } from 'node:path'
+import { initDb, closeDb } from './db'
+import {
+  addWorkspace,
+  getDefaultWorkspaceId,
+  listWorkspaces,
+  removeWorkspace,
+  setDefaultWorkspaceId
+} from './services/workspace'
+import {
+  createSession,
+  deleteSession,
+  duplicateSession,
+  listDeletedSessions,
+  listMessages,
+  listSessions,
+  renameSession,
+  restoreSession
+} from './services/session'
+import { interrupt, send } from './services/chat'
+import {
+  readEnv,
+  readModels,
+  readPermissions,
+  saveEnv,
+  saveModels,
+  savePermissions,
+  testConnection
+} from './services/claudeSettings'
+import { listSkills, toggleSkill } from './services/skills'
+import {
+  addMarketplace,
+  installPlugin,
+  listMarketplaces,
+  listPlugins,
+  removeMarketplace,
+  togglePlugin,
+  uninstallPlugin
+} from './services/plugins'
+import type { EnvEntry } from '../shared/types'
+
+let mainWindow: BrowserWindow | null = null
+
+function createWindow(): void {
+  mainWindow = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    minWidth: 960,
+    minHeight: 600,
+    show: false,
+    backgroundColor: '#ffffff',
+    autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  })
+
+  mainWindow.on('ready-to-show', () => mainWindow?.show())
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+
+  if (process.env['ELECTRON_RENDERER_URL']) {
+    void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  } else {
+    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+}
+
+/** 统一把异常转成渲染层可读的错误，避免 IPC 调用直接 reject 而丢信息 */
+function handle(channel: string, fn: (...args: never[]) => unknown): void {
+  ipcMain.handle(channel, async (_event, ...args) => {
+    try {
+      return await (fn as (...a: unknown[]) => unknown)(...args)
+    } catch (e) {
+      throw new Error(e instanceof Error ? e.message : String(e))
+    }
+  })
+}
+
+function registerIpc(): void {
+  handle('app:ping', () => 'pong')
+
+  /* 工作区 */
+  handle('workspace:list', () => listWorkspaces())
+  handle('workspace:add', (dir: string) => addWorkspace(dir))
+  handle('workspace:remove', (id: string) => removeWorkspace(id))
+  handle('workspace:getDefault', () => getDefaultWorkspaceId())
+  handle('workspace:setDefault', (id: string | null) => setDefaultWorkspaceId(id))
+  handle('workspace:pick', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      title: '选择项目目录'
+    })
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+
+  /* 会话 */
+  handle('session:list', () => listSessions())
+  handle('session:listDeleted', () => listDeletedSessions())
+  handle('session:messages', (id: string) => listMessages(id))
+  handle('session:create', (workspaceId: string | null) => createSession(workspaceId))
+  handle('session:rename', (id: string, title: string) => renameSession(id, title))
+  handle('session:remove', (id: string) => deleteSession(id))
+  handle('session:restore', (id: string) => restoreSession(id))
+  handle('session:duplicate', (id: string) => duplicateSession(id))
+
+  /* 对话 */
+  handle('chat:send', async (sessionId: string, text: string) => {
+    const sessions = listSessions()
+    const session = sessions.find((s) => s.id === sessionId)
+    if (!session) throw new Error('会话不存在')
+    const workspace = listWorkspaces().find((w) => w.id === session.workspaceId)
+    if (!workspace) throw new Error('会话所属工作区已被移除')
+
+    const skills = (await listSkills(workspace.path)).filter((s) => s.enabled).map((s) => s.name)
+    void send(sessionId, text, workspace.path, skills)
+  })
+  handle('chat:interrupt', () => interrupt())
+
+  /* 配置 */
+  handle('config:readEnv', () => readEnv())
+  handle('config:saveEnv', (entries: EnvEntry[]) => saveEnv(entries))
+  handle('config:readPermissions', () => readPermissions())
+  handle('config:savePermissions', (p: { defaultMode: string; allow: string[]; deny: string[] }) =>
+    savePermissions(p)
+  )
+  handle('config:readModels', () => readModels())
+  handle('config:saveModels', (m: Record<string, string>) => saveModels(m))
+  handle('config:testConnection', () => testConnection())
+
+  /* Skill */
+  handle('skill:list', async () => {
+    const def = getDefaultWorkspaceId()
+    const ws = listWorkspaces().find((w) => w.id === def)
+    return listSkills(ws?.path ?? null)
+  })
+  handle('skill:toggle', async (name: string, enabled: boolean) => {
+    await toggleSkill(name, enabled)
+    const def = getDefaultWorkspaceId()
+    const ws = listWorkspaces().find((w) => w.id === def)
+    return listSkills(ws?.path ?? null)
+  })
+
+  /* 插件与仓库 */
+  handle('plugin:list', () => listPlugins())
+  handle('plugin:toggle', async (id: string, enabled: boolean) => {
+    await togglePlugin(id, enabled)
+    return listPlugins()
+  })
+  handle('plugin:install', (id: string) => installPlugin(id))
+  handle('plugin:uninstall', (id: string) => uninstallPlugin(id))
+  handle('marketplace:list', () => listMarketplaces())
+  handle('marketplace:add', async (name: string, repo: string) => {
+    await addMarketplace(name, repo)
+    return listMarketplaces()
+  })
+  handle('marketplace:remove', async (name: string) => {
+    await removeMarketplace(name)
+    return listMarketplaces()
+  })
+}
+
+app.whenReady().then(() => {
+  initDb()
+  registerIpc()
+  createWindow()
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', () => {
+  closeDb()
+})
