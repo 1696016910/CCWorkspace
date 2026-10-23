@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useSessionStore } from '@/stores/session'
 
 const ws = useWorkspaceStore()
+const sessions = useSessionStore()
+
+/** 用于在移除确认里告知会连带删除多少会话 */
+function sessionCountOf(workspaceId: string): number {
+  return sessions.list.filter((s) => s.workspaceId === workspaceId).length
+}
 </script>
 
 <template>
@@ -35,7 +42,7 @@ const ws = useWorkspaceStore()
           <div class="st-r">
             <span v-if="ws.defaultId === w.id" class="st-tag-default">默认</span>
             <button v-else class="st-btn" @click="ws.setDefault(w.id)">设为默认</button>
-            <button class="st-btn dgr" @click="ws.remove(w.id)">移除</button>
+            <button class="st-btn dgr" @click="ws.remove(w.id, sessionCountOf(w.id))">移除</button>
           </div>
         </div>
         <div v-if="ws.list.length === 0" class="st-empty-row">还没有工作区</div>
@@ -43,7 +50,9 @@ const ws = useWorkspaceStore()
       <button class="st-add-row" @click="ws.pickAndAdd()">＋ 添加工作区</button>
     </div>
 
-    <div class="st-notice info">移除工作区不会删除磁盘目录，也不会删除会话数据。</div>
+    <div class="st-notice warn">
+      移除工作区只影响应用内的记录：磁盘上的项目目录不会被删除，但该工作区下的会话与消息会一并删除且无法恢复。
+    </div>
     <p v-if="ws.error" class="st-err">{{ ws.error }}</p>
   </div>
 </template>

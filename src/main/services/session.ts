@@ -86,6 +86,9 @@ export function createSession(workspaceId: string | null): SessionSummary {
   const target = resolveWorkspaceId(workspaceId)
   if (!target) throw new Error('请先添加工作区')
 
+  const exists = getDb().prepare('SELECT id FROM workspaces WHERE id = ?').get(target)
+  if (!exists) throw new Error('指定的工作区不存在')
+
   const now = new Date().toISOString()
   const id = randomUUID()
   getDb()
@@ -109,25 +112,30 @@ export function createSession(workspaceId: string | null): SessionSummary {
 export function renameSession(id: string, title: string): void {
   const trimmed = title.trim()
   if (!trimmed) throw new Error('标题不能为空')
-  getDb()
+  const result = getDb()
     .prepare('UPDATE sessions SET title = ?, auto_title = 0, updated_at = ? WHERE id = ?')
     .run(trimmed, new Date().toISOString(), id)
+  if (result.changes === 0) throw new Error('会话不存在')
 }
 
 /** 软删除：只打标记，消息保留以便恢复 */
 export function deleteSession(id: string): void {
-  getDb()
+  const result = getDb()
     .prepare('UPDATE sessions SET deleted_at = ? WHERE id = ?')
     .run(new Date().toISOString(), id)
+  if (result.changes === 0) throw new Error('会话不存在')
 }
 
 export function restoreSession(id: string): void {
-  getDb().prepare('UPDATE sessions SET deleted_at = NULL WHERE id = ?').run(id)
+  const result = getDb().prepare('UPDATE sessions SET deleted_at = NULL WHERE id = ?').run(id)
+  if (result.changes === 0) throw new Error('会话不存在')
 }
 
 /** 彻底删除：连消息一起从数据库中移除，不可恢复 */
 export function purgeSession(id: string): void {
   const db = getDb()
+  const exists = db.prepare('SELECT id FROM sessions WHERE id = ?').get(id)
+  if (!exists) throw new Error('会话不存在')
   db.exec('BEGIN')
   try {
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(id)
@@ -183,6 +191,17 @@ export function duplicateSession(id: string): SessionSummary {
   return toSummary(row)
 }
 
+/** 工具调用以 JSON 存在列里；损坏时降级为空，不让整条消息读不出来 */
+function parseTools(raw: string | null): ChatMessage['tools'] {
+  if (!raw) return undefined
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? (parsed as ChatMessage['tools']) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** 读取某会话的全部消息 */
 export function listMessages(sessionId: string): ChatMessage[] {
   const rows = getDb()
@@ -193,7 +212,7 @@ export function listMessages(sessionId: string): ChatMessage[] {
     id: r.id,
     role: r.role === 'assistant' ? 'assistant' : 'user',
     text: r.content,
-    tools: r.tools ? (JSON.parse(r.tools) as ChatMessage['tools']) : undefined,
+    tools: parseTools(r.tools),
     timestamp: r.created_at
   }))
 }

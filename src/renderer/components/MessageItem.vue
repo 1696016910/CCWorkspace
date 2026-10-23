@@ -6,6 +6,17 @@ import { extractFilePaths, renderMarkdown } from '@/utils/markdown'
 const props = defineProps<{ message: ChatMessage }>()
 
 const expanded = ref(false)
+const copied = ref(false)
+
+async function copyText(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(props.message.text)
+    copied.value = true
+    setTimeout(() => (copied.value = false), 1500)
+  } catch {
+    // 剪贴板不可用时静默失败，不打断阅读
+  }
+}
 
 const isUser = computed(() => props.message.role === 'user')
 const hasTools = computed(() => (props.message.tools?.length ?? 0) > 0)
@@ -30,6 +41,9 @@ async function openFile(path: string): Promise<void> {
 <template>
   <div v-if="isUser" class="msg-user">
     <div class="bubble">{{ message.text }}</div>
+    <button class="user-copy" :title="copied ? '已复制' : '复制'" @click="copyText">
+      {{ copied ? '✓' : '⧉' }}
+    </button>
   </div>
 
   <div v-else class="msg-ai">
@@ -57,6 +71,13 @@ async function openFile(path: string): Promise<void> {
     <!-- eslint-disable-next-line vue/no-v-html -- 已经过 DOMPurify 净化 -->
     <div class="ai-text md" v-html="html" />
 
+    <div class="msg-actions">
+      <button class="act" :title="copied ? '已复制' : '复制'" @click="copyText">
+        <svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M15 5.5H6A1.5 1.5 0 004.5 7v9" /></svg>
+        <span>{{ copied ? '已复制' : '复制' }}</span>
+      </button>
+    </div>
+
     <div v-if="files.length" class="files">
       <button v-for="f in files" :key="f" class="file-chip" :title="f" @click="openFile(f)">
         <svg viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z" /><path d="M13 3.5v5h5" /></svg>
@@ -67,10 +88,70 @@ async function openFile(path: string): Promise<void> {
 </template>
 
 <style scoped>
+.user-copy {
+  align-self: flex-end;
+  margin-left: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  color: var(--t4);
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s;
+}
+
+.msg-user:hover .user-copy {
+  opacity: 1;
+}
+
+.user-copy:hover {
+  background: var(--bg-hover);
+  color: var(--t2);
+}
+
+.msg-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+  opacity: 0;
+  transition: opacity 0.14s;
+}
+
+.msg-ai:hover .msg-actions {
+  opacity: 1;
+}
+
+.act {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  color: var(--t3);
+}
+
+.act:hover {
+  background: var(--bg-hover);
+  color: var(--t1);
+}
+
+.act svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .msg-user {
   display: flex;
   justify-content: flex-end;
   margin-bottom: 30px;
+  animation: msg-in 0.22s ease both;
 }
 
 .msg-user .bubble {
@@ -87,6 +168,7 @@ async function openFile(path: string): Promise<void> {
 
 .msg-ai {
   margin-bottom: 30px;
+  animation: msg-in 0.22s ease both;
 }
 
 .ai-role {

@@ -22,7 +22,7 @@ import {
   restoreSession,
   purgeSession
 } from './services/session'
-import { compact, getContextUsage, interrupt, listCommands, refreshContext, send } from './services/chat'
+import { assertCanSend, compact, getContextUsage, interrupt, listCommands, refreshContext, send } from './services/chat'
 import {
   readEnv,
   readModels,
@@ -90,8 +90,6 @@ function handle(channel: string, fn: (...args: never[]) => unknown): void {
 }
 
 function registerIpc(): void {
-  handle('app:ping', () => 'pong')
-
   /* 主题 */
   handle('theme:get', () => getTheme())
   handle('theme:set', (theme: 'light' | 'dark') => setTheme(theme))
@@ -124,7 +122,6 @@ function registerIpc(): void {
     else mainWindow.maximize()
   })
   handle('window:close', () => mainWindow?.close())
-  handle('window:isMaximized', () => mainWindow?.isMaximized() ?? false)
 
   /* 原生确认对话框（渲染层 window.confirm 在 Electron 中不可用） */
   handle('dialog:confirm', async (message: string) => {
@@ -184,7 +181,21 @@ function registerIpc(): void {
     if (!workspace) throw new Error('会话所属工作区已被移除')
 
     const skills = (await listSkills(workspace.path)).filter((s) => s.enabled).map((s) => s.name)
-    void send(sessionId, text, workspace.path, skills)
+
+    // 同步前置校验：这类错误要立即反馈给调用方
+    assertCanSend(text)
+
+    // 不 await：回复通过 chat:event 流式推送，IPC 立即返回，
+    // 否则渲染层要等整轮结束，输入框会一直处于禁用状态
+    void send(sessionId, text, workspace.path, skills).catch((e: unknown) => {
+      BrowserWindow.getAllWindows().forEach((w) =>
+        w.webContents.send('chat:event', {
+          type: 'error',
+          sessionId,
+          message: e instanceof Error ? e.message : String(e)
+        })
+      )
+    })
   })
   handle('chat:interrupt', () => interrupt())
 
@@ -262,7 +273,17 @@ function registerIpc(): void {
 }
 
 app.whenReady().then(() => {
-  initDb()
+  try {
+    initDb()
+  } catch (e) {
+    // 数据库无法初始化时仍要给出可见反馈，而不是静默退出
+    dialog.showErrorBox(
+      '数据库初始化失败',
+      `${e instanceof Error ? e.message : String(e)}
+
+请删除用户数据目录下的 workbench.db 后重试。`
+    )
+  }
   registerIpc()
   createWindow()
 

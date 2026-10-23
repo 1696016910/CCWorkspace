@@ -20,7 +20,8 @@ async function load(): Promise<void> {
 async function save(): Promise<void> {
   saving.value = true
   try {
-    await window.api.config.saveEnv(entries.value)
+    // 响应式代理无法被结构化克隆，先转成普通对象再传
+    await window.api.config.saveEnv(entries.value.map((e) => ({ key: e.key, value: e.value })))
     flash('已保存，已备份到 ~/.claude/backups/', false)
   } catch (e) {
     flash(e instanceof Error ? e.message : String(e), true)

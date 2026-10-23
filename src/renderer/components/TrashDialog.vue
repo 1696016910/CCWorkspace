@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import type { SessionSummary } from '@shared/types'
 
 const emit = defineEmits<{ close: []; restored: [] }>()
@@ -39,7 +39,15 @@ async function purge(s: SessionSummary): Promise<void> {
   }
 }
 
-onMounted(load)
+function onEsc(e: KeyboardEvent): void {
+  if (e.key === 'Escape') emit('close')
+}
+
+onMounted(() => {
+  void load()
+  window.addEventListener('keydown', onEsc)
+})
+onUnmounted(() => window.removeEventListener('keydown', onEsc))
 </script>
 
 <template>

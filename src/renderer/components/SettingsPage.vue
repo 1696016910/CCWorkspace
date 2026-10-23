@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import WorkspaceSection from './settings/WorkspaceSection.vue'
 import EnvSection from './settings/EnvSection.vue'
 import PermissionsSection from './settings/PermissionsSection.vue'
@@ -8,12 +8,7 @@ import SkillsSection from './settings/SkillsSection.vue'
 import PluginsSection from './settings/PluginsSection.vue'
 import MarketplacesSection from './settings/MarketplacesSection.vue'
 
-const emit = defineEmits<{
-  close: []
-  minimize: []
-  maximize: []
-  'close-app': []
-}>()
+const emit = defineEmits<{ close: [] }>()
 
 const TABS = [
   { id: 'ws', label: '工作区', group: '工作' },
@@ -28,6 +23,14 @@ const TABS = [
 type TabId = (typeof TABS)[number]['id']
 
 const active = ref<TabId>('ws')
+
+/** Esc 关闭设置页 */
+function onEsc(e: KeyboardEvent): void {
+  if (e.key === 'Escape') emit('close')
+}
+
+onMounted(() => window.addEventListener('keydown', onEsc))
+onUnmounted(() => window.removeEventListener('keydown', onEsc))
 
 const groups = [
   { name: '工作', ids: ['ws'] as TabId[] },
@@ -49,11 +52,7 @@ function labelOf(id: TabId): string {
       </button>
       <span class="st-title">设置</span>
       <span class="sp" />
-      <div class="wctl">
-        <button title="最小化" @click="emit('minimize')">—</button>
-        <button title="最大化" @click="emit('maximize')">□</button>
-        <button class="close" title="关闭" @click="emit('close-app')">✕</button>
-      </div>
+      <button class="close-btn" title="关闭设置" @click="emit('close')">✕</button>
     </div>
     <div class="st-body">
       <nav class="st-nav">
@@ -104,10 +103,6 @@ function labelOf(id: TabId): string {
   border-bottom: 1px solid var(--line);
 }
 
-.st-bar {
-  -webkit-app-region: drag;
-}
-
 .st-bar .back {
   display: flex;
   align-items: center;
@@ -133,29 +128,17 @@ function labelOf(id: TabId): string {
   line-height: 1;
 }
 
-.wctl {
-  display: flex;
-  -webkit-app-region: no-drag;
-}
-
-.wctl button {
-  width: 32px;
-  height: 24px;
-  display: grid;
-  place-items: center;
+.close-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
   color: var(--t3);
-  border-radius: 4px;
   font-size: 11px;
 }
 
-.wctl button:hover {
+.close-btn:hover {
   background: var(--bg-hover);
   color: var(--t1);
-}
-
-.wctl button.close:hover {
-  background: #e81123;
-  color: #fff;
 }
 
 .st-bar .st-title {

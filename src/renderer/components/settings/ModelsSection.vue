@@ -21,7 +21,7 @@ async function load(): Promise<void> {
 async function save(): Promise<void> {
   saving.value = true
   try {
-    await window.api.config.saveModels(models.value)
+    await window.api.config.saveModels({ ...models.value })
     message.value = '已保存，新会话生效'
     setTimeout(() => (message.value = null), 3000)
   } catch (e) {

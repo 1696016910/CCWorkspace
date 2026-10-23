@@ -41,8 +41,6 @@ interface QueryHandle {
 }
 
 let active: ActiveRun | null = null
-/** 最近一次运行留下的 Query，仅在迭代期间可查询 */
-let lastQuery: QueryHandle | null = null
 /** 最后结束那一轮抓到的上下文快照，按会话 id 隔离 */
 const ctxSnapshots = new Map<
   string,
@@ -94,15 +92,20 @@ function deltaText(event: unknown): string | null {
   return null
 }
 
+/** 发送前的同步校验，供 IPC 层即时返回错误 */
+export function assertCanSend(text: string): void {
+  if (!text.trim()) throw new Error('消息不能为空')
+  if (active) throw new Error('已有回复正在生成，请先停止')
+}
+
 export async function send(
   sessionId: string,
   text: string,
   cwd: string,
   skills: string[]
 ): Promise<void> {
-  if (active) throw new Error('已有回复正在生成，请先停止')
+  assertCanSend(text)
 
-  // 后续轮次用 CLI 会话 id 续接，否则每轮都是全新上下文
   const resumeId = getClaudeSessionId(sessionId) ?? undefined
 
   appendMessage(sessionId, 'user', text)
@@ -111,6 +114,8 @@ export async function send(
   let acc = ''
   const tools: ToolCall[] = []
   let aborted = false
+  let sawAnyEvent = false
+  let timedOut = false
   let usage: Usage = { inputTokens: 0, outputTokens: 0, costUsd: 0, percentage: 0 }
 
   try {
@@ -133,26 +138,44 @@ export async function send(
         env: { ...process.env, ...envOverrides } as Record<string, string>,
         model,
         permissionMode: mode,
-        // 开启流式增量，否则只能等整段回复结束
         includePartialMessages: true,
         pathToClaudeCodeExecutable: resolveClaudeBinary(),
         skills: skills.length > 0 ? skills : undefined
       }
     })
 
-    lastQuery = q as unknown as QueryHandle
-
     active = {
       abort: () => {
         aborted = true
-        void q.interrupt()
+        void q.interrupt().catch(() => {})
       }
     }
 
-    for await (const message of q) {
-      if (aborted) break
+    const iterator = q[Symbol.asyncIterator]()
 
-      // 流式增量：逐字推给界面
+    while (!aborted) {
+      const next = await Promise.race([
+        iterator.next(),
+        new Promise<{ done: true; value: undefined; timedOut: true }>((resolve) =>
+          setTimeout(() => resolve({ done: true, value: undefined, timedOut: true }), 30_000)
+        )
+      ])
+      if (next.done) {
+        timedOut = 'timedOut' in next
+        break
+      }
+
+      const message = next.value
+      // hook_started / hook_response 等系统事件不代表模型已响应
+      if (
+        message.type === 'assistant' ||
+        message.type === 'stream_event' ||
+        message.type === 'result' ||
+        (message.type === 'system' && message.subtype === 'init')
+      ) {
+        sawAnyEvent = true
+      }
+
       if (message.type === 'stream_event') {
         const delta = deltaText((message as unknown as { event: unknown }).event)
         if (delta) {
@@ -163,7 +186,6 @@ export async function send(
       }
 
       if (message.type === 'assistant') {
-        // /context 结果会带结构化 context_usage，直接存下来给弹层用
         const withCtx = message as unknown as {
           context_usage?: {
             model?: string
@@ -191,12 +213,10 @@ export async function send(
         if (!Array.isArray(blocks)) continue
 
         for (const block of blocks) {
-          // 文本已在 stream_event 中逐字推送过，这里只补漏（无流式时）
           if (block['type'] === 'text' && typeof block['text'] === 'string') {
-            const full = block['text']
             if (!acc) {
-              acc = full
-              emit({ type: 'text', sessionId, delta: full })
+              acc = block['text']
+              emit({ type: 'text', sessionId, delta: acc })
             }
           } else if (block['type'] === 'tool_use') {
             const input = (block['input'] ?? {}) as Record<string, unknown>
@@ -210,16 +230,13 @@ export async function send(
             emit({ type: 'tool', sessionId, tool })
           }
         }
-      } else if (message.type === 'system' && message.subtype === 'init') {
-        // 首次轮次记住 CLI 会话 id
-        const init = message as unknown as {
-          session_id?: string
-          slash_commands?: string[]
-        }
+        continue
+      }
+
+      if (message.type === 'system' && message.subtype === 'init') {
+        const init = message as unknown as { session_id?: string; slash_commands?: string[] }
         if (init.session_id) setClaudeSessionId(sessionId, init.session_id)
-        // init 里只有名字；描述要靠 supportedCommands 补全
         if (init.slash_commands?.length) {
-          const names = init.slash_commands
           const live = q as unknown as QueryHandle
           let described: SlashCommandInfo[] = []
           try {
@@ -238,7 +255,7 @@ export async function send(
           commandsCache =
             described.length > 0
               ? described
-              : names.map((name) => ({
+              : init.slash_commands.map((name) => ({
                   name,
                   description: '',
                   argumentHint: '',
@@ -246,7 +263,10 @@ export async function send(
                 }))
           emit({ type: 'commands', sessionId })
         }
-      } else if (message.type === 'result') {
+        continue
+      }
+
+      if (message.type === 'result') {
         const r = message as unknown as {
           session_id?: string
           usage?: { input_tokens?: number; output_tokens?: number }
@@ -255,7 +275,6 @@ export async function send(
         }
         if (r.session_id) setClaudeSessionId(sessionId, r.session_id)
 
-        // 上下文窗口从 modelUsage 里取；input_tokens 即本轮结束时占用的上下文量
         let maxTokens = 0
         let windowModel = ''
         for (const [name, info] of Object.entries(r.modelUsage ?? {})) {
@@ -273,7 +292,6 @@ export async function send(
           costUsd: r.total_cost_usd ?? 0,
           percentage: pct
         }
-
         ctxSnapshots.set(sessionId, {
           model: windowModel || model || '',
           total_tokens: used,
@@ -284,17 +302,6 @@ export async function send(
         setContextUsage(sessionId, used, maxTokens, pct)
       }
     }
-
-    // 一轮结束后补一次上下文百分比，并持久化到会话
-    try {
-      if (lastQuery?.getContextUsage) {
-        const ctx = await lastQuery.getContextUsage({ detail: 'summary' })
-        usage.percentage = ctx.percentage
-        setContextUsage(sessionId, ctx.total_tokens, ctx.raw_max_tokens, ctx.percentage)
-      }
-    } catch {
-      // 用量查询失败不影响本轮结果
-    }
   } catch (e) {
     active = null
     emit({ type: 'error', sessionId, message: e instanceof Error ? e.message : String(e) })
@@ -302,6 +309,16 @@ export async function send(
   }
 
   active = null
+
+  // 超时或从未收到有效响应：多半是服务不可达
+  if ((timedOut || !sawAnyEvent) && !aborted) {
+    emit({
+      type: 'error',
+      sessionId,
+      message: '连接超时，请检查网络与 ANTHROPIC_BASE_URL 配置'
+    })
+    return
+  }
 
   const saved = appendMessage(
     sessionId,
@@ -443,6 +460,56 @@ export async function refreshContext(
  * 由 CLI 自身完成摘要并产生 compact_boundary 消息。
  */
 export async function compact(sessionId: string, cwd: string, skills: string[]): Promise<void> {
-  await send(sessionId, '/compact', cwd, skills)
+  if (active) throw new Error('请先等待当前回复结束')
+
+  emit({ type: 'start', sessionId })
+  try {
+    const { query } = await import('@anthropic-ai/claude-agent-sdk')
+    const raw = await readRaw()
+    const envOverrides = raw.env && typeof raw.env === 'object' ? raw.env : {}
+    const models = await readModels()
+
+    const q = query({
+      prompt: oneShot('/compact'),
+      options: {
+        cwd,
+        resume: getClaudeSessionId(sessionId) ?? undefined,
+        env: { ...process.env, ...envOverrides } as Record<string, string>,
+        model: models['ANTHROPIC_MODEL'] || undefined,
+        permissionMode: 'acceptEdits',
+        pathToClaudeCodeExecutable: resolveClaudeBinary(),
+        skills: skills.length > 0 ? skills : undefined
+      }
+    })
+
+    // 压缩不写入用户消息，只把摘要结果落库
+    let summary = ''
+    for await (const m of q) {
+      if (m.type === 'assistant') {
+        const blocks = (m as unknown as { message?: { content?: Array<Record<string, unknown>> } })
+          .message?.content
+        if (!Array.isArray(blocks)) continue
+        for (const b of blocks) {
+          if (b['type'] === 'text' && typeof b['text'] === 'string') summary += b['text']
+        }
+      }
+    }
+
+    if (summary.trim()) {
+      appendMessage(sessionId, 'assistant', `（上下文已压缩）
+
+${summary.trim()}`)
+    }
+  } catch (e) {
+    emit({
+      type: 'error',
+      sessionId,
+      message: `压缩失败：${e instanceof Error ? e.message : String(e)}`
+    })
+    return
+  } finally {
+    active = null
+  }
+
   emit({ type: 'compacted', sessionId })
 }

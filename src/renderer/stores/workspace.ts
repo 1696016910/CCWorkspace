@@ -56,9 +56,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (dir) await add(dir)
   }
 
-  async function remove(id: string): Promise<void> {
+  /**
+   * 移除工作区会级联删掉它下面的所有会话与消息（不可恢复），
+   * 因此必须先向用户确认，并明确告知后果。
+   */
+  async function remove(id: string, sessionCount: number): Promise<boolean> {
+    const name = list.value.find((w) => w.id === id)?.name ?? '该工作区'
+    const detail =
+      sessionCount > 0
+        ? `移除「${name}」会同时删除它下面的 ${sessionCount} 个会话及其全部消息，且无法恢复。磁盘目录不会被删除。`
+        : `移除「${name}」？磁盘目录不会被删除。`
+    const ok = await window.api.dialog.confirm(detail)
+    if (!ok) return false
     list.value = await window.api.workspace.remove(id)
     defaultId.value = await window.api.workspace.getDefault()
+    return true
   }
 
   async function setDefault(id: string | null): Promise<void> {

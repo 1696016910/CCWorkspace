@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import type { PluginInfo } from '@shared/types'
 
 const plugins = ref<PluginInfo[]>([])
@@ -70,6 +70,9 @@ async function install(): Promise<void> {
   }
 }
 
+/** 插件 id 形如 name@marketplace；格式不对时禁用安装，避免无谓的 CLI 调用 */
+const canInstall = computed(() => /^[\w.-]+@[\w.-]+$/.test(newPluginId.value.trim()))
+
 function initials(name: string): string {
   return name.slice(0, 2).toUpperCase()
 }
@@ -90,7 +93,7 @@ onMounted(load)
         placeholder="插件 ID，如 xxx@marketplace"
         @keydown.enter="install"
       />
-      <button class="st-btn pri" :disabled="!newPluginId.trim() || busy !== null" @click="install">
+      <button class="st-btn pri" :disabled="!canInstall || busy !== null" @click="install">
         {{ busy ? '处理中…' : '安装' }}
       </button>
     </div>
@@ -272,7 +275,7 @@ onMounted(load)
 .mini.del.confirming {
   width: auto;
   padding: 0 6px;
-  background: #fbeaea;
+  background: rgba(217, 83, 79, 0.12);
   color: var(--red);
   font-size: 11px;
 }

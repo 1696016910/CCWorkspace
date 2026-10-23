@@ -7,10 +7,12 @@ import type { ChatMessage, ContextUsageDetail, SlashCommandInfo } from '@shared/
 import MessageItem from './MessageItem.vue'
 import { renderMarkdown } from '@/utils/markdown'
 import ContextPopover from './ContextPopover.vue'
+import { useToast } from '@/composables/useToast'
 
 const sessions = useSessionStore()
 const ws = useWorkspaceStore()
 const chat = useChatStore()
+const toast = useToast()
 
 const input = ref('')
 const thread = ref<HTMLElement | null>(null)
@@ -60,9 +62,32 @@ async function loadContext(): Promise<void> {
   }
 }
 
+let ctxPollTimer: ReturnType<typeof setTimeout> | null = null
+
 async function toggleContext(): Promise<void> {
   ctxOpen.value = !ctxOpen.value
-  if (ctxOpen.value) await loadContext()
+  if (!ctxOpen.value) {
+    if (ctxPollTimer) clearTimeout(ctxPollTimer)
+    return
+  }
+  // 已有分类明细就直接用；没有才向主进程要（此时才可能跑一次 /context）
+  if (ctxDetail.value && ctxDetail.value.categories.length > 0) return
+  void pollContext()
+}
+
+/**
+ * 主进程在后台跑 /context 后才会写入分类明细，
+ * 因此打开面板时轮询几次，拿到数据就停。
+ */
+async function pollContext(): Promise<void> {
+  if (!ctxOpen.value) return
+  ctxLoading.value = true
+  await loadContext()
+  ctxLoading.value = false
+  const hasCats = (ctxDetail.value?.categories.length ?? 0) > 0
+  if (!hasCats && ctxOpen.value) {
+    ctxPollTimer = setTimeout(() => void pollContext(), 1500)
+  }
 }
 
 async function doCompact(): Promise<void> {
@@ -82,14 +107,25 @@ async function scrollToBottom(): Promise<void> {
 function onMessageSaved(msg: ChatMessage): void {
   sessions.messages = [...sessions.messages, msg]
   void sessions.load()
-  void loadContext()
+  // 一轮结束后主进程已写入新的上下文用量，重新读一次即可，无需再跑 /context
+  void refreshCtxFromCache()
   void scrollToBottom()
+}
+
+/** 只读缓存，不触发生成 */
+async function refreshCtxFromCache(): Promise<void> {
+  if (!current.value) return
+  const d = await window.api.context.usage(current.value.id)
+  if (d) ctxDetail.value = d
 }
 
 onMounted(() => {
   chat.listen({
     onDone: onMessageSaved,
-    onFinish: (id) => sessions.setRunning(id, false),
+    onFinish: (id) => {
+      sessions.setRunning(id, false)
+      if (chat.error) toast.error(chat.error)
+    },
     onCommands: async (id) => {
       commands.value = await window.api.commands.list(id)
     }
@@ -103,8 +139,8 @@ watch(
     ctxDetail.value = null
     const active = current.value
     if (active) {
-      // 预热带出命令清单与上下文分类；不进入聊天流
-      void loadContext().then(async () => {
+      // 切换会话只读缓存；命令清单同样先读缓存，不主动触发生成
+      void refreshCtxFromCache().then(async () => {
         commands.value = await window.api.commands.list(active.id)
       })
     }
@@ -152,10 +188,15 @@ const filteredCommands = computed(() => {
       c.name.toLowerCase().includes(q) ||
       c.description.toLowerCase().includes(q)
   )
-  // 内置命令排前面，其次按名字排序
+  // 排序：前缀命中 > 内置 > 名称字母序
+  const score = (c: SlashCommandInfo): number => {
+    if (!q) return c.builtin ? 0 : 1
+    if (c.name.toLowerCase().startsWith(q)) return 0
+    return c.builtin ? 1 : 2
+  }
   return [...list].sort((a, b) => {
-    if (a.builtin !== b.builtin) return a.builtin ? -1 : 1
-    return a.name.localeCompare(b.name)
+    const d = score(a) - score(b)
+    return d !== 0 ? d : a.name.localeCompare(b.name)
   })
 })
 
@@ -259,7 +300,8 @@ async function send(): Promise<void> {
   sessions.setRunning(current.value.id, true)
   void scrollToBottom()
 
-  await chat.send(current.value.id, prefix + text)
+  const ok = await chat.send(current.value.id, prefix + text)
+  if (!ok) toast.error(chat.error ?? '发送失败')
 }
 
 async function stop(): Promise<void> {
@@ -290,7 +332,7 @@ async function stop(): Promise<void> {
       <div class="thread-inner">
         <MessageItem v-for="m in sessions.messages" :key="m.id" :message="m" />
 
-        <div v-if="chat.streaming" class="msg-ai">
+        <div v-if="chat.streaming && chat.streamingSessionId === current?.id" class="msg-ai">
           <div class="ai-role"><span class="who">Claude</span></div>
           <div v-if="chat.streamTools.length" class="steps">
             <div v-for="(t, i) in chat.streamTools" :key="i" class="step">
@@ -314,12 +356,17 @@ async function stop(): Promise<void> {
       <div class="eico">
         <svg viewBox="0 0 24 24"><path d="M4.5 5.5h15v10.5h-9l-6 4v-14.5z" /></svg>
       </div>
-      <h2>{{ ws.list.length === 0 ? '先添加一个工作区' : '选择一个会话开始' }}</h2>
-      <p v-if="ws.list.length === 0">工作区就是你的项目目录。添加后即可在里面新建会话。</p>
-      <p v-else>从左侧选一个会话，或点击工作区右侧的 ＋ 新建。</p>
+      <h2>{{ ws.list.length === 0 ? '开始使用 Claude 工作台' : '选择一个会话开始' }}</h2>
+      <p v-if="ws.list.length === 0">
+        工作区就是你的项目目录。添加后即可在里面新建会话，与 Claude 对话、管理插件与配置。
+      </p>
+      <p v-else>从左侧选一个会话，或把鼠标移到工作区名称上点击 ＋ 新建。</p>
       <button v-if="ws.list.length === 0" class="primary-btn" @click="ws.pickAndAdd()">
-        添加工作区
+        选择项目目录
       </button>
+      <div v-if="ws.list.length === 0" class="tips">
+        <span class="tip">会话数据保存在本机，与终端里的 Claude Code 互不影响</span>
+      </div>
     </div>
 
     <div v-if="current" class="composer-wrap">
@@ -350,7 +397,7 @@ async function stop(): Promise<void> {
           v-model="input"
           rows="2"
           placeholder="描述你想让它做的事，或输入 / 调用命令与 Skill…"
-          :disabled="chat.streaming"
+          :disabled="chat.streaming && chat.streamingSessionId === current?.id"
           @input="onInput"
           @keydown="onKeydown"
           @paste="onPaste"
@@ -367,7 +414,12 @@ async function stop(): Promise<void> {
             <span class="ctx-num">{{ ctxLabel }}</span>
           </button>
 
-          <button v-if="chat.streaming" class="send-btn stop" title="停止" @click="stop">
+          <button
+            v-if="chat.streaming && chat.streamingSessionId === current?.id"
+            class="send-btn stop"
+            title="停止"
+            @click="stop"
+          >
             <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" /></svg>
           </button>
           <button v-else class="send-btn" :disabled="!input.trim()" title="发送" @click="send">
@@ -679,6 +731,15 @@ async function stop(): Promise<void> {
 
 .primary-btn:hover {
   background: var(--green-h);
+}
+
+.tips {
+  margin-top: 22px;
+}
+
+.tip {
+  font-size: 11.5px;
+  color: var(--t4);
 }
 
 .composer-wrap {

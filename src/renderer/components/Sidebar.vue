@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
+import { useToast } from '@/composables/useToast'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSessionStore } from '@/stores/session'
 import type { SessionSummary } from '@shared/types'
@@ -8,6 +9,7 @@ const emit = defineEmits<{ 'open-settings': []; 'open-trash': [] }>()
 
 const ws = useWorkspaceStore()
 const sessions = useSessionStore()
+const toast = useToast()
 
 onMounted(async () => {
   theme.value = await window.api.theme.get()
@@ -42,7 +44,8 @@ async function newChat(): Promise<void> {
 
 /** 在工作区名称右侧直接新建会话（Qoder 式） */
 async function newChatIn(workspaceId: string): Promise<void> {
-  await sessions.create(workspaceId)
+  const created = await sessions.create(workspaceId)
+  if (created) toast.success('已新建会话')
 }
 
 /* ── 主题切换 ── */
@@ -72,7 +75,10 @@ async function commitWsRename(id: string): Promise<void> {
   if (renamingWsId.value !== id) return
   const name = wsRenameDraft.value.trim()
   renamingWsId.value = null
-  if (name) await ws.rename(id, name)
+  if (name) {
+    await ws.rename(id, name)
+    toast.success('工作区已重命名')
+  }
 }
 
 /* ── 重命名：Electron 不支持 window.prompt，改用内联输入 ── */
@@ -99,10 +105,29 @@ async function commitRename(): Promise<void> {
   if (!trimmed) return
   await sessions.rename(id, trimmed)
   await sessions.select(id)
+  toast.success('已重命名')
 }
 
 function cancelRename(): void {
   renamingId.value = null
+}
+
+/** 未命名的会话按时间顺序编号，避免列表里出现多个同名条目 */
+function displayTitle(list: SessionSummary[], s: SessionSummary): string {
+  if (s.title !== '(新会话)') return s.title
+  const unnamed = list.filter((x) => x.title === '(新会话)')
+  if (unnamed.length <= 1) return s.title
+  const idx = unnamed.findIndex((x) => x.id === s.id)
+  return `新会话 ${idx + 1}`
+}
+
+/** 只保留路径的最后两级，避免侧栏被长路径撑破 */
+function shortPath(full: string): string {
+  const parts = full.split(/[\/]/).filter(Boolean)
+  if (parts.length <= 2) return full
+  const tail = parts.slice(-2).join('/')
+  const isWin = /^[A-Za-z]:/.test(full)
+  return `${isWin ? parts[0] + ':/' : '/'}…/${tail}`
 }
 
 function relativeTime(iso: string): string {
@@ -150,24 +175,26 @@ function relativeTime(iso: string): string {
             />
             <template v-else>
               <span class="wname">{{ g.name }}</span>
-              <span class="wpath" :title="g.path">{{ g.path }}</span>
+              <span class="wpath" :title="g.path">{{ shortPath(g.path) }}</span>
             </template>
           </span>
           <span class="wcnt">{{ g.sessions.length }}</span>
-          <button
-            class="ws-add"
-            title="重命名工作区"
-            @click.stop="startWsRename(g.workspaceId, g.name)"
-          >
-            ✎
-          </button>
-          <button
-            class="ws-add"
-            title="在此工作区新建会话"
-            @click.stop="newChatIn(g.workspaceId)"
-          >
-            ＋
-          </button>
+          <span class="ws-actions">
+            <button
+              class="ws-add"
+              title="重命名工作区"
+              @click.stop="startWsRename(g.workspaceId, g.name)"
+            >
+              ✎
+            </button>
+            <button
+              class="ws-add"
+              title="在此工作区新建会话"
+              @click.stop="newChatIn(g.workspaceId)"
+            >
+              ＋
+            </button>
+          </span>
         </div>
 
         <div v-show="!ws.isCollapsed(g.workspaceId)" class="ws-body">
@@ -190,15 +217,24 @@ function relativeTime(iso: string): string {
               @blur="commitRename"
             />
             <template v-else>
-              <span class="cn">{{ s.title }}</span>
+              <span class="cn">{{ displayTitle(g.sessions, s) }}</span>
               <span class="ctime">{{ relativeTime(s.updatedAt) }}</span>
-              <button
-                class="edit-btn"
-                title="重命名"
-                @click.stop="startRename($event, s.id, s.title)"
-              >
-                ✎
-              </button>
+              <span class="chat-actions">
+                <button
+                  class="edit-btn"
+                  title="重命名"
+                  @click.stop="startRename($event, s.id, s.title)"
+                >
+                  ✎
+                </button>
+                <button
+                  class="edit-btn"
+                  title="删除会话"
+                  @click.stop="sessions.remove(s.id)"
+                >
+                  ✕
+                </button>
+              </span>
               <span class="cd" :class="sessions.isRunning(s.id) ? 'live' : 'idle'" />
             </template>
           </div>
@@ -320,11 +356,12 @@ function relativeTime(iso: string): string {
 }
 
 .ws-head {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 7px;
-  height: 30px;
-  padding: 0 8px;
+  min-height: 34px;
+  padding: 3px 8px;
   border-radius: var(--r);
   cursor: pointer;
   transition: background 0.12s;
@@ -368,7 +405,8 @@ function relativeTime(iso: string): string {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  line-height: 1.25;
+  line-height: 1.3;
+  overflow: hidden;
 }
 
 .wname {
@@ -387,8 +425,9 @@ function relativeTime(iso: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;
-  text-align: left;
+  /* 长路径优先保留尾部（项目名），用 dir=ltr + 反向省略不可行，
+     这里直接截断显示，title 提供完整路径 */
+  display: block;
 }
 
 .ws-rename {
@@ -408,28 +447,37 @@ function relativeTime(iso: string): string {
   flex: none;
 }
 
-.ws-add {
+.ws-actions {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
   display: none;
+  gap: 2px;
+  padding: 1px 2px 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  box-shadow: -6px 0 8px var(--bg-hover);
+}
+
+.ws-head:hover .ws-actions {
+  display: flex;
+}
+
+.ws-add {
   width: 18px;
   height: 18px;
   border-radius: 4px;
   color: var(--t3);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1;
   flex: none;
+  display: grid;
   place-items: center;
 }
 
-.ws-head:hover .ws-add {
-  display: grid;
-}
-
-.ws-head:hover .wcnt {
-  display: none;
-}
-
 .ws-add:hover {
-  background: #e0e0e3;
+  background: var(--bg-select);
   color: var(--t1);
 }
 
@@ -488,28 +536,50 @@ function relativeTime(iso: string): string {
   flex: none;
 }
 
-.edit-btn {
+.chat-actions {
   display: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  color: var(--t3);
-  font-size: 10px;
+  gap: 1px;
   flex: none;
-  place-items: center;
 }
 
-.chat:hover .edit-btn {
-  display: grid;
+.chat:hover .chat-actions {
+  display: flex;
 }
 
 .chat:hover .ctime {
   display: none;
 }
 
+.edit-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--t3);
+  font-size: 10px;
+  display: grid;
+  place-items: center;
+}
+
 .edit-btn:hover {
-  background: #e0e0e3;
+  background: var(--bg-select);
   color: var(--t1);
+}
+
+/* 流式中显示绿点，否则显示时间 */
+.cd.live {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
 }
 
 .rename-input {

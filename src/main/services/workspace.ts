@@ -30,7 +30,10 @@ export function listWorkspaces(): Workspace[] {
   return rows.map(toWorkspace)
 }
 
-export async function addWorkspace(dir: string): Promise<Workspace[]> {
+export async function addWorkspace(dir: string | null | undefined): Promise<Workspace[]> {
+  if (typeof dir !== 'string' || !dir.trim()) {
+    throw new Error('请选择一个目录')
+  }
   const absolute = resolve(dir)
   if (!(await isDirectory(absolute))) {
     throw new Error(`目录不存在或不可读：${absolute}`)

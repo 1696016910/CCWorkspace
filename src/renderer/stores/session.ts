@@ -11,11 +11,15 @@ export const useSessionStore = defineStore('session', () => {
   /** 正在生成回复的会话，用于侧栏绿点 */
   const runningIds = ref<Set<string>>(new Set())
 
+  /** 当前会话是否就是正在生成的那个 */
+  const streamingSessionId = ref<string | null>(null)
+
   function setRunning(id: string, running: boolean): void {
     const next = new Set(runningIds.value)
     if (running) next.add(id)
     else next.delete(id)
     runningIds.value = next
+    streamingSessionId.value = running ? id : streamingSessionId.value === id ? null : streamingSessionId.value
   }
 
   function isRunning(id: string): boolean {
@@ -54,9 +58,15 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  /** 防抖令牌：快速切换会话时，只有最后一次请求的结果会写入 */
+  let selectToken = 0
+
   async function select(id: string): Promise<void> {
+    const token = ++selectToken
     currentId.value = id
-    messages.value = await window.api.session.messages(id)
+    const loaded = await window.api.session.messages(id)
+    if (token !== selectToken) return
+    messages.value = loaded
   }
 
   async function create(workspaceId: string | null): Promise<SessionSummary | null> {
@@ -99,6 +109,7 @@ export const useSessionStore = defineStore('session', () => {
     loading,
     error,
     runningIds,
+    streamingSessionId,
     byWorkspace,
     load,
     select,

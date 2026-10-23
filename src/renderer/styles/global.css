@@ -28,6 +28,7 @@
   --r-lg: 10px;
 
   --font: "Segoe UI", "Microsoft YaHei UI", "PingFang SC", -apple-system, system-ui, sans-serif;
+  --font-feature: "cv02", "cv03", "cv04", "cv11";
   --mono: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
 }
 
@@ -50,6 +51,8 @@ body {
   line-height: 1.5;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: var(--font-feature);
 }
 
 button {
@@ -342,7 +345,7 @@ textarea {
   --green-t: #79bd93;
   --green-soft: #1e2b23;
   --red: #e06c66;
-  --blue: #5c9ee0;
+  --blue: #6aa8e8;
 }
 
 :root[data-theme='dark'] body {
@@ -390,4 +393,54 @@ textarea {
   background: #4a4a54;
   border: 3px solid transparent;
   background-clip: content-box;
+}
+
+/* ── 交互过渡与动画 ── */
+button {
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease,
+    opacity 0.14s ease, transform 0.1s ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* 消息入场 */
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 减少动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 焦点可见性（键盘可达性） */
+:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
+/* 文字选中 */
+::selection {
+  background: rgba(71, 129, 92, 0.22);
+}
+
+/* 滚动条在暗色下更和谐 */
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: #3a3a42;
 }

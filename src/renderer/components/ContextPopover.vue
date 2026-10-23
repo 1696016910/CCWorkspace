@@ -50,9 +50,9 @@ function fmt(n: number): string {
         <button class="x" @click="emit('close')">✕</button>
       </div>
 
-      <div v-if="loading" class="loading">读取中…</div>
+      <div v-if="loading && !detail" class="loading">读取中…</div>
 
-      <template v-else-if="detail">
+      <template v-if="detail">
         <div class="big">
           <span class="pct">{{ percent }}%</span>
           <span class="tokens">{{ fmt(detail.totalTokens) }} / {{ fmt(detail.maxTokens) }} tokens</span>
@@ -70,7 +70,12 @@ function fmt(n: number): string {
             <span class="ctokens">{{ fmt(c.tokens) }}</span>
           </div>
         </div>
-        <p v-else class="nocat">正在读取分类明细…</p>
+        <div v-else class="skeleton">
+          <div class="sk-row" />
+          <div class="sk-row" />
+          <div class="sk-row" />
+          <p class="nocat">正在读取分类明细…</p>
+        </div>
 
         <div v-if="freeRow" class="free-row">
           <span>剩余空间</span>
@@ -80,11 +85,11 @@ function fmt(n: number): string {
         <div class="notice">
           <span>压缩会把历史对话摘要成一段更短的上下文，之后仍可继续对话，但细节会丢失。</span>
         </div>
-
-        <button class="compact-btn" @click="emit('compact')">压缩上下文</button>
       </template>
 
-      <div v-else class="loading">暂无上下文数据，先发一条消息试试。</div>
+      <div v-else-if="!loading" class="loading">暂无上下文数据，先发一条消息试试。</div>
+
+      <button class="compact-btn" @click="emit('compact')">压缩上下文</button>
     </div>
   </div>
 </template>
@@ -224,8 +229,38 @@ function fmt(n: number): string {
 .nocat {
   font-size: 12px;
   color: var(--t4);
-  padding: 10px 0;
+  padding: 8px 0 0;
   text-align: center;
+}
+
+.skeleton {
+  padding: 4px 0 8px;
+}
+
+.sk-row {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--bg-soft);
+  margin-bottom: 8px;
+  animation: sk-pulse 1.4s ease-in-out infinite;
+}
+
+.sk-row:nth-child(2) {
+  width: 78%;
+}
+
+.sk-row:nth-child(3) {
+  width: 60%;
+}
+
+@keyframes sk-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .cname em {

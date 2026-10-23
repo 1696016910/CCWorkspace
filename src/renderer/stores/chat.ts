@@ -13,6 +13,8 @@ export interface ChatEvent {
 
 export const useChatStore = defineStore('chat', () => {
   const streaming = ref(false)
+  /** 正在生成的会话 id；界面据此判断是否显示流式内容 */
+  const streamingSessionId = ref<string | null>(null)
   const streamText = ref('')
   const streamTools = ref<ToolCall[]>([])
   const error = ref<string | null>(null)
@@ -39,6 +41,7 @@ export const useChatStore = defineStore('chat', () => {
       switch (e.type) {
         case 'start':
           streaming.value = true
+          streamingSessionId.value = e.sessionId
           streamText.value = ''
           streamTools.value = []
           error.value = null
@@ -51,6 +54,7 @@ export const useChatStore = defineStore('chat', () => {
           break
         case 'done':
           streaming.value = false
+          streamingSessionId.value = null
           if (e.usage) usage.value = e.usage
           if (e.message) listeners.onDone(e.message)
           streamText.value = ''
@@ -59,6 +63,7 @@ export const useChatStore = defineStore('chat', () => {
           break
         case 'error':
           streaming.value = false
+          streamingSessionId.value = null
           error.value = typeof e.message === 'string' ? e.message : '发生未知错误'
           streamText.value = ''
           streamTools.value = []
@@ -66,6 +71,7 @@ export const useChatStore = defineStore('chat', () => {
           break
         case 'interrupted':
           streaming.value = false
+          streamingSessionId.value = null
           listeners.onFinish(e.sessionId)
           break
         case 'commands':
@@ -75,21 +81,26 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  async function send(sessionId: string, text: string): Promise<void> {
+  /** 发送一条消息；返回是否成功发起（生成中的失败通过事件回传） */
+  async function send(sessionId: string, text: string): Promise<boolean> {
     activeSessionId.value = sessionId
     streaming.value = true
     error.value = null
     try {
       await window.api.chat.send(sessionId, text)
+      return true
     } catch (e) {
       streaming.value = false
+      streamingSessionId.value = null
       error.value = e instanceof Error ? e.message : String(e)
+      return false
     }
   }
 
   async function stop(): Promise<void> {
     await window.api.chat.interrupt()
     streaming.value = false
+    streamingSessionId.value = null
   }
 
   /** 压缩当前会话的上下文 */
@@ -99,6 +110,7 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     streaming,
+    streamingSessionId,
     streamText,
     streamTools,
     error,
