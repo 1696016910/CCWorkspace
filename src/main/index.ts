@@ -6,7 +6,10 @@ import {
   getDefaultWorkspaceId,
   listWorkspaces,
   removeWorkspace,
-  setDefaultWorkspaceId
+  renameWorkspace,
+  setDefaultWorkspaceId,
+  getTheme,
+  setTheme
 } from './services/workspace'
 import {
   createSession,
@@ -16,9 +19,10 @@ import {
   listMessages,
   listSessions,
   renameSession,
-  restoreSession
+  restoreSession,
+  purgeSession
 } from './services/session'
-import { compact, getContextUsage, interrupt, listCommands, send } from './services/chat'
+import { compact, getContextUsage, interrupt, listCommands, refreshContext, send } from './services/chat'
 import {
   readEnv,
   readModels,
@@ -50,9 +54,8 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     backgroundColor: '#ffffff',
+    // 使用系统原生标题栏与窗口按钮
     autoHideMenuBar: true,
-    titleBarStyle: 'hidden',
-    titleBarOverlay: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
       contextIsolation: true,
@@ -88,6 +91,30 @@ function handle(channel: string, fn: (...args: never[]) => unknown): void {
 
 function registerIpc(): void {
   handle('app:ping', () => 'pong')
+
+  /* 主题 */
+  handle('theme:get', () => getTheme())
+  handle('theme:set', (theme: 'light' | 'dark') => setTheme(theme))
+
+  /* 打开文件或目录（用于点击生成的文件） */
+  handle('file:open', async (path: string) => {
+    const err = await shell.openPath(path)
+    if (err) throw new Error(err)
+  })
+
+  /**
+   * 保存粘贴进来的图片或文件到应用数据目录。
+   * 渲染进程只有 base64，落盘后才能把路径交给模型。
+   */
+  handle('file:savePaste', async (name: string, base64: string) => {
+    const { mkdir, writeFile } = await import('node:fs/promises')
+    const dir = join(app.getPath('userData'), 'attachments')
+    await mkdir(dir, { recursive: true })
+    const safe = name.replace(/[^\w.\-]/g, '_')
+    const target = join(dir, `${Date.now()}-${safe}`)
+    await writeFile(target, Buffer.from(base64, 'base64'))
+    return target
+  })
 
   /* 窗口控制 */
   handle('window:minimize', () => mainWindow?.minimize())
@@ -128,6 +155,7 @@ function registerIpc(): void {
   handle('workspace:remove', (id: string) => removeWorkspace(id))
   handle('workspace:getDefault', () => getDefaultWorkspaceId())
   handle('workspace:setDefault', (id: string | null) => setDefaultWorkspaceId(id))
+  handle('workspace:rename', (id: string, name: string) => renameWorkspace(id, name))
   handle('workspace:pick', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory'],
@@ -145,6 +173,7 @@ function registerIpc(): void {
   handle('session:remove', (id: string) => deleteSession(id))
   handle('session:restore', (id: string) => restoreSession(id))
   handle('session:duplicate', (id: string) => duplicateSession(id))
+  handle('session:purge', (id: string) => purgeSession(id))
 
   /* 对话 */
   handle('chat:send', async (sessionId: string, text: string) => {
@@ -160,7 +189,15 @@ function registerIpc(): void {
   handle('chat:interrupt', () => interrupt())
 
   /* 上下文与命令 */
-  handle('context:usage', (sessionId: string) => getContextUsage(sessionId))
+  handle('context:usage', async (sessionId: string) => {
+    const session = listSessions().find((s) => s.id === sessionId)
+    const workspace = session
+      ? listWorkspaces().find((w) => w.id === session.workspaceId)
+      : undefined
+    if (!workspace) return getContextUsage(sessionId)
+    const skills = (await listSkills(workspace.path)).filter((s) => s.enabled).map((s) => s.name)
+    return refreshContext(sessionId, workspace.path, skills)
+  })
   handle('context:compact', async (sessionId: string) => {
     const session = listSessions().find((s) => s.id === sessionId)
     if (!session) throw new Error('会话不存在')

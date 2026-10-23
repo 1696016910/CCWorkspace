@@ -157,7 +157,7 @@ onMounted(load)
   padding: 0 10px;
   border: 1px solid var(--line-3);
   border-radius: var(--r);
-  background: #fcfcfd;
+  background: var(--surface-2);
   font-family: var(--mono);
   font-size: 11.5px;
 }
@@ -178,7 +178,7 @@ onMounted(load)
   padding: 13px;
   border: 1px solid var(--line-2);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   transition: border-color 0.12s, box-shadow 0.12s;
 }
 

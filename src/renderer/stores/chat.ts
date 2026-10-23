@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import type { ChatMessage, ToolCall } from '@shared/types'
 
 export interface ChatEvent {
-  type: 'start' | 'text' | 'tool' | 'done' | 'error' | 'interrupted'
+  type: 'start' | 'text' | 'tool' | 'done' | 'error' | 'interrupted' | 'compacted' | 'commands'
   sessionId: string
   delta?: string
   tool?: ToolCall
@@ -26,6 +26,8 @@ export const useChatStore = defineStore('chat', () => {
     onDone: (msg: ChatMessage) => void
     /** 任意结束（完成 / 出错 / 中断），用于清理运行态 */
     onFinish: (sessionId: string) => void
+    /** 命令清单就绪 */
+    onCommands?: (sessionId: string) => void
   }
 
   function listen(listeners: Listeners): void {
@@ -65,6 +67,9 @@ export const useChatStore = defineStore('chat', () => {
         case 'interrupted':
           streaming.value = false
           listeners.onFinish(e.sessionId)
+          break
+        case 'commands':
+          listeners.onCommands?.(e.sessionId)
           break
       }
     })

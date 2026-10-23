@@ -16,10 +16,22 @@ const percent = computed(() => {
 
 const barWidth = computed(() => Math.max(props.detail?.percentage ?? 0, 0.5))
 
+const KIND_LABEL: Record<string, string> = {
+  used: '',
+  deferred: '（窗口外）',
+  free: '（剩余）',
+  buffer: '（预留）'
+}
+
+/** /context 返回的分类里，free 是剩余空间，单独展示更直观 */
 const usedRows = computed(() =>
   (props.detail?.categories ?? [])
-    .filter((c) => c.tokens > 0 && c.kind === 'used')
+    .filter((c) => c.tokens > 0 && c.kind !== 'free')
     .sort((a, b) => b.tokens - a.tokens)
+)
+
+const freeRow = computed(() =>
+  (props.detail?.categories ?? []).find((c) => c.kind === 'free')
 )
 
 function fmt(n: number): string {
@@ -54,11 +66,16 @@ function fmt(n: number): string {
 
         <div v-if="usedRows.length" class="cats">
           <div v-for="c in usedRows" :key="c.name" class="cat">
-            <span class="cname">{{ c.name }}</span>
+            <span class="cname">{{ c.name }}<em v-if="KIND_LABEL[c.kind]">{{ KIND_LABEL[c.kind] }}</em></span>
             <span class="ctokens">{{ fmt(c.tokens) }}</span>
           </div>
         </div>
-        <p v-else class="nocat">暂无分类明细</p>
+        <p v-else class="nocat">正在读取分类明细…</p>
+
+        <div v-if="freeRow" class="free-row">
+          <span>剩余空间</span>
+          <span>{{ fmt(freeRow.tokens) }}</span>
+        </div>
 
         <div class="notice">
           <span>压缩会把历史对话摘要成一段更短的上下文，之后仍可继续对话，但细节会丢失。</span>
@@ -86,7 +103,7 @@ function fmt(n: number): string {
 
 .pop {
   width: 380px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--line-2);
   border-radius: 10px;
   box-shadow: 0 16px 44px rgba(0, 0, 0, 0.16);
@@ -211,10 +228,27 @@ function fmt(n: number): string {
   text-align: center;
 }
 
+.cname em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--t4);
+  margin-left: 4px;
+}
+
+.free-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--line);
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--t3);
+}
+
 .notice {
   padding: 9px 11px;
   border-radius: 7px;
-  background: #f7f8fa;
+  background: var(--surface-2);
   border: 1px solid var(--line);
   font-size: 11.5px;
   color: var(--t3);
@@ -227,7 +261,7 @@ function fmt(n: number): string {
   height: 32px;
   border-radius: 7px;
   border: 1px solid var(--line-3);
-  background: #fcfcfc;
+  background: var(--surface-2);
   font-size: 12.5px;
   color: var(--t1);
 }

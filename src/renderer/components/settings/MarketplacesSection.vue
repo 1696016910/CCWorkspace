@@ -96,7 +96,7 @@ onMounted(load)
   padding: 0 10px;
   border: 1px solid var(--line-3);
   border-radius: var(--r);
-  background: #fcfcfd;
+  background: var(--surface-2);
   font-size: 12px;
 }
 

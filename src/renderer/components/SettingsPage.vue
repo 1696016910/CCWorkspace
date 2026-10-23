@@ -116,7 +116,7 @@ function labelOf(id: TabId): string {
   padding: 0 10px 0 8px;
   border-radius: 5px;
   border: 1px solid var(--line-2);
-  background: #fff;
+  background: var(--surface);
   color: var(--t1);
   font-size: 12.5px;
   -webkit-app-region: no-drag;

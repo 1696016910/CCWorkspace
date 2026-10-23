@@ -80,6 +80,30 @@ export function setDefaultWorkspaceId(id: string | null): void {
   ).run(id)
 }
 
+/** 重命名工作区（只改展示名，不动磁盘目录） */
+export function renameWorkspace(id: string, name: string): Workspace[] {
+  const trimmed = name.trim()
+  if (!trimmed) throw new Error('名称不能为空')
+  getDb().prepare('UPDATE workspaces SET name = ? WHERE id = ?').run(trimmed, id)
+  return listWorkspaces()
+}
+
+/** 读取界面主题偏好 */
+export function getTheme(): 'light' | 'dark' {
+  const row = getDb().prepare("SELECT value FROM meta WHERE key = 'theme'").get() as
+    | { value?: string }
+    | undefined
+  return row?.value === 'dark' ? 'dark' : 'light'
+}
+
+export function setTheme(theme: 'light' | 'dark'): void {
+  getDb()
+    .prepare(
+      "INSERT INTO meta(key, value) VALUES('theme', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    )
+    .run(theme)
+}
+
 /** 解析新建会话应归属的工作区：显式指定 → 默认 → 第一个 */
 export function resolveWorkspaceId(requested: string | null): string | null {
   if (requested) return requested

@@ -22,6 +22,23 @@ async function restore(id: string): Promise<void> {
   emit('restored')
 }
 
+/* Electron 不支持 window.confirm，用原生对话框 */
+const confirmingId = ref<string | null>(null)
+
+async function purge(s: SessionSummary): Promise<void> {
+  const ok = await window.api.dialog.confirm(
+    `彻底删除「${s.title}」？此操作不可恢复，消息将永久从数据库中移除。`
+  )
+  if (!ok) return
+  confirmingId.value = s.id
+  try {
+    await window.api.session.purge(s.id)
+    list.value = list.value.filter((x) => x.id !== s.id)
+  } finally {
+    confirmingId.value = null
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -44,6 +61,9 @@ onMounted(load)
               <div class="meta">{{ s.messageCount }} 条消息 · {{ new Date(s.updatedAt).toLocaleString() }}</div>
             </div>
             <button class="btn" @click="restore(s.id)">恢复</button>
+            <button class="btn dgr" :disabled="confirmingId === s.id" @click="purge(s)">
+              {{ confirmingId === s.id ? '删除中…' : '彻底删除' }}
+            </button>
           </div>
         </div>
       </div>
@@ -152,12 +172,21 @@ onMounted(load)
   padding: 0 11px;
   border-radius: var(--r);
   border: 1px solid var(--line-3);
-  background: #fcfcfc;
+  background: var(--surface-2);
   font-size: 12px;
   color: var(--t1);
 }
 
 .btn:hover {
   background: var(--bg-hover);
+}
+
+.btn.dgr {
+  color: var(--red);
+  border-color: #e9c9c7;
+}
+
+.btn.dgr:hover {
+  background: #fbeaea;
 }
 </style>

@@ -12,6 +12,7 @@ export type ChatEvent =
   | { type: 'error'; sessionId: string; message: string }
   | { type: 'interrupted'; sessionId: string }
   | { type: 'compacted'; sessionId: string }
+  | { type: 'commands'; sessionId: string }
 
 export interface Usage {
   inputTokens: number
@@ -162,6 +163,28 @@ export async function send(
       }
 
       if (message.type === 'assistant') {
+        // /context 结果会带结构化 context_usage，直接存下来给弹层用
+        const withCtx = message as unknown as {
+          context_usage?: {
+            model?: string
+            total_tokens?: number
+            raw_max_tokens?: number
+            percentage?: number
+            categories?: { name?: string; tokens?: number; kind?: string }[]
+          }
+        }
+        if (withCtx.context_usage) {
+          const c = withCtx.context_usage
+          ctxSnapshots.set(sessionId, {
+            model: c.model ?? '',
+            total_tokens: c.total_tokens ?? 0,
+            raw_max_tokens: c.raw_max_tokens ?? 0,
+            percentage: c.percentage ?? 0,
+            categories: c.categories ?? []
+          })
+          setContextUsage(sessionId, c.total_tokens ?? 0, c.raw_max_tokens ?? 0, c.percentage ?? 0)
+        }
+
         const blocks = (
           message as unknown as { message?: { content?: Array<Record<string, unknown>> } }
         ).message?.content
@@ -192,17 +215,36 @@ export async function send(
         const init = message as unknown as {
           session_id?: string
           slash_commands?: string[]
-          skills?: string[]
         }
         if (init.session_id) setClaudeSessionId(sessionId, init.session_id)
-        // init 消息自带命令与 Skill 清单，无需额外查询
+        // init 里只有名字；描述要靠 supportedCommands 补全
         if (init.slash_commands?.length) {
-          commandsCache = init.slash_commands.map((name) => ({
-            name,
-            description: '',
-            argumentHint: '',
-            builtin: true
-          }))
+          const names = init.slash_commands
+          const live = q as unknown as QueryHandle
+          let described: SlashCommandInfo[] = []
+          try {
+            if (typeof live.supportedCommands === 'function') {
+              const list = await live.supportedCommands()
+              described = list.map((c) => ({
+                name: c.name,
+                description: c.description,
+                argumentHint: c.argumentHint,
+                builtin: c.builtin === true
+              }))
+            }
+          } catch {
+            // 拿不到描述时退回只有名字
+          }
+          commandsCache =
+            described.length > 0
+              ? described
+              : names.map((name) => ({
+                  name,
+                  description: '',
+                  argumentHint: '',
+                  builtin: true
+                }))
+          emit({ type: 'commands', sessionId })
         }
       } else if (message.type === 'result') {
         const r = message as unknown as {
@@ -300,6 +342,99 @@ export async function getContextUsage(sessionId: string): Promise<ContextUsageDe
 /** 列出当前会话可用的斜杠命令与 Skill；同样只能用迭代期间抓到的缓存 */
 export async function listCommands(_sessionId?: string): Promise<SlashCommandInfo[]> {
   return commandsCache
+}
+
+/**
+ * 主动跑一次 /context 以取得分类明细。
+ *
+ * UI 打开上下文面板时用它取数据：不经过聊天流，
+ * 因此不会把界面置为「生成中」，也不产生用户可见的消息。
+ */
+export async function refreshContext(
+  sessionId: string,
+  cwd: string,
+  skills: string[]
+): Promise<ContextUsageDetail | null> {
+  if (active) return getContextUsage(sessionId)
+
+  const existing = ctxSnapshots.get(sessionId)
+  if (existing && existing.categories && existing.categories.length > 0) {
+    return getContextUsage(sessionId)
+  }
+
+  try {
+    const { query } = await import('@anthropic-ai/claude-agent-sdk')
+    const raw = await readRaw()
+    const envOverrides = raw.env && typeof raw.env === 'object' ? raw.env : {}
+    const models = await readModels()
+
+    const q = query({
+      prompt: oneShot('/context'),
+      options: {
+        cwd,
+        resume: getClaudeSessionId(sessionId) ?? undefined,
+        env: { ...process.env, ...envOverrides } as Record<string, string>,
+        model: models['ANTHROPIC_MODEL'] || undefined,
+        permissionMode: 'plan',
+        pathToClaudeCodeExecutable: resolveClaudeBinary(),
+        skills: skills.length > 0 ? skills : undefined
+      }
+    })
+
+    for await (const m of q) {
+      if (m.type === 'system' && m.subtype === 'init') {
+        const init = m as unknown as { session_id?: string; slash_commands?: string[] }
+        if (init.session_id) setClaudeSessionId(sessionId, init.session_id)
+        if (init.slash_commands?.length) {
+          const live = q as unknown as QueryHandle
+          try {
+            if (typeof live.supportedCommands === 'function') {
+              const list = await live.supportedCommands()
+              commandsCache = list.map((c) => ({
+                name: c.name,
+                description: c.description,
+                argumentHint: c.argumentHint,
+                builtin: c.builtin === true
+              }))
+            }
+          } catch {
+            commandsCache = init.slash_commands.map((name) => ({
+              name,
+              description: '',
+              argumentHint: '',
+              builtin: true
+            }))
+          }
+        }
+      }
+      if (m.type === 'assistant') {
+        const withCtx = m as unknown as {
+          context_usage?: {
+            model?: string
+            total_tokens?: number
+            raw_max_tokens?: number
+            percentage?: number
+            categories?: { name?: string; tokens?: number; kind?: string }[]
+          }
+        }
+        if (withCtx.context_usage) {
+          const c = withCtx.context_usage
+          ctxSnapshots.set(sessionId, {
+            model: c.model ?? '',
+            total_tokens: c.total_tokens ?? 0,
+            raw_max_tokens: c.raw_max_tokens ?? 0,
+            percentage: c.percentage ?? 0,
+            categories: c.categories ?? []
+          })
+          setContextUsage(sessionId, c.total_tokens ?? 0, c.raw_max_tokens ?? 0, c.percentage ?? 0)
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[context] refresh 失败:', e)
+  }
+
+  return getContextUsage(sessionId)
 }
 
 /**

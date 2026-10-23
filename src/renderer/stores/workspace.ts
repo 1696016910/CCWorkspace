@@ -66,6 +66,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     defaultId.value = id
   }
 
+  async function rename(id: string, name: string): Promise<void> {
+    list.value = await window.api.workspace.rename(id, name)
+  }
+
   function toggle(id: string): void {
     const next = new Set(collapsed.value)
     if (next.has(id)) next.delete(id)
@@ -88,6 +92,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     add,
     pickAndAdd,
     remove,
+    rename,
     setDefault,
     toggle,
     isCollapsed

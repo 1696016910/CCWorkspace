@@ -20,6 +20,7 @@ const win = {
 }
 
 onMounted(async () => {
+  document.documentElement.dataset.theme = await window.api.theme.get()
   await ws.load()
   await sessions.load()
   const first = sessions.list[0]

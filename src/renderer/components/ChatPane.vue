@@ -5,6 +5,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { useChatStore } from '@/stores/chat'
 import type { ChatMessage, ContextUsageDetail, SlashCommandInfo } from '@shared/types'
 import MessageItem from './MessageItem.vue'
+import { renderMarkdown } from '@/utils/markdown'
 import ContextPopover from './ContextPopover.vue'
 
 const sessions = useSessionStore()
@@ -51,6 +52,7 @@ async function loadContext(): Promise<void> {
   if (!current.value) return
   ctxLoading.value = true
   try {
+    // 由主进程负责在需要时跑一次 /context 并等待结构化结果
     const d = await window.api.context.usage(current.value.id)
     if (d) ctxDetail.value = d
   } finally {
@@ -87,7 +89,10 @@ function onMessageSaved(msg: ChatMessage): void {
 onMounted(() => {
   chat.listen({
     onDone: onMessageSaved,
-    onFinish: (id) => sessions.setRunning(id, false)
+    onFinish: (id) => sessions.setRunning(id, false),
+    onCommands: async (id) => {
+      commands.value = await window.api.commands.list(id)
+    }
   })
 })
 
@@ -96,11 +101,12 @@ watch(
   async () => {
     attachments.value = []
     ctxDetail.value = null
-    if (current.value) {
-      await loadContext()
-      if (commands.value.length === 0) {
-        commands.value = await window.api.commands.list(current.value.id)
-      }
+    const active = current.value
+    if (active) {
+      // 预热带出命令清单与上下文分类；不进入聊天流
+      void loadContext().then(async () => {
+        commands.value = await window.api.commands.list(active.id)
+      })
     }
     await nextTick()
     scrollToBottom()
@@ -119,16 +125,38 @@ function onInput(e: Event): void {
   el.style.height = `${Math.min(el.scrollHeight, 180)}px`
 
   const value = el.value
+  const wasOpen = cmdOpen.value
   cmdOpen.value = value.startsWith('/')
   if (cmdOpen.value) {
     cmdIndex.value = 0
+    if (!wasOpen) void ensureCommands()
   }
+}
+
+/**
+ * 首次打开命令面板时拉一次完整清单。
+ * SDK 的完整命令列表只在跑过一轮后才拿到，因此这里若为空，
+ * 触发一次 /context（代价最小、且顺带刷新上下文）。
+ */
+let warming = false
+async function ensureCommands(): Promise<void> {
+  if (commands.value.length > 0 || warming) return
+  if (!current.value) return
+  commands.value = await window.api.commands.list(current.value.id)
 }
 
 const filteredCommands = computed(() => {
   const q = input.value.startsWith('/') ? input.value.slice(1).toLowerCase() : ''
-  const list = commands.value.filter((c) => c.name.toLowerCase().includes(q))
-  return list.slice(0, 8)
+  const list = commands.value.filter(
+    (c) =>
+      c.name.toLowerCase().includes(q) ||
+      c.description.toLowerCase().includes(q)
+  )
+  // 内置命令排前面，其次按名字排序
+  return [...list].sort((a, b) => {
+    if (a.builtin !== b.builtin) return a.builtin ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
 })
 
 function applyCommand(c: SlashCommandInfo): void {
@@ -167,11 +195,42 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
+/** 支持从剪贴板粘贴图片或文件 */
+async function onPaste(e: ClipboardEvent): Promise<void> {
+  const items = e.clipboardData?.items
+  if (!items) return
+  let handled = false
+  for (const item of Array.from(items)) {
+    if (item.kind !== 'file') continue
+    const file = item.getAsFile()
+    if (!file) continue
+    handled = true
+    const buf = await file.arrayBuffer()
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
+    const name = file.name || (file.type.startsWith('image/') ? `pasted-${Date.now()}.png` : `pasted-${Date.now()}`)
+    const saved = await window.api.file.savePaste(name, base64)
+    attachments.value = [...attachments.value, saved]
+  }
+  if (handled) e.preventDefault()
+}
+
 async function pickFiles(): Promise<void> {
   const files = await window.api.dialog.pickFiles()
   if (files.length) {
     attachments.value = [...attachments.value, ...files]
   }
+}
+
+function fileUrl(path: string): string {
+  return `file:///${path.split('\\').join('/')}`
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path
+}
+
+function isImage(path: string): boolean {
+  return /\.(png|jpe?g|gif|webp)$/i.test(path)
 }
 
 function removeAttachment(i: number): void {
@@ -240,7 +299,11 @@ async function stop(): Promise<void> {
               <span class="sarg">{{ t.target }}</span>
             </div>
           </div>
-          <div class="ai-text">{{ chat.streamText }}<span class="caret" /></div>
+          <div v-if="chat.streamText" class="ai-text md" v-html="renderMarkdown(chat.streamText)" />
+          <div v-else class="thinking">
+            <span class="dot" /><span class="dot" /><span class="dot" />
+            <span class="thinking-label">正在思考</span>
+          </div>
         </div>
 
         <div v-if="chat.error" class="chat-error">{{ chat.error }}</div>
@@ -262,7 +325,8 @@ async function stop(): Promise<void> {
     <div v-if="current" class="composer-wrap">
       <div v-if="attachments.length" class="attach-row">
         <span v-for="(f, i) in attachments" :key="i" class="attach-chip">
-          {{ f.split(/[\\/]/).pop() }}
+          <img v-if="isImage(f)" :src="fileUrl(f)" class="attach-thumb" alt="" />
+          {{ fileName(f) }}
           <button class="attach-x" @click="removeAttachment(i)">✕</button>
         </span>
       </div>
@@ -277,7 +341,7 @@ async function stop(): Promise<void> {
             @mousedown.prevent="applyCommand(c)"
           >
             <span class="cmd-name">/{{ c.name }}</span>
-            <span class="cmd-desc">{{ c.description || c.argumentHint }}</span>
+            <span class="cmd-desc">{{ c.description || c.argumentHint || '' }}</span>
           </button>
         </div>
 
@@ -289,6 +353,7 @@ async function stop(): Promise<void> {
           :disabled="chat.streaming"
           @input="onInput"
           @keydown="onKeydown"
+          @paste="onPaste"
         />
 
         <div class="composer-bar">
@@ -310,7 +375,7 @@ async function stop(): Promise<void> {
           </button>
         </div>
       </div>
-      <div class="hint">Enter 发送 · Shift + Enter 换行 · / 调用命令</div>
+      <div class="hint">Enter 发送 · Shift + Enter 换行 · / 调用命令 · 可直接粘贴图片</div>
     </div>
 
     <ContextPopover
@@ -465,20 +530,86 @@ async function stop(): Promise<void> {
   word-break: break-word;
 }
 
-.caret {
-  display: inline-block;
-  width: 2px;
-  height: 14px;
-  background: var(--green);
-  vertical-align: -2px;
-  margin-left: 2px;
-  animation: blink 1.1s steps(1) infinite;
+.thinking {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 23px;
+  color: var(--t3);
 }
 
-@keyframes blink {
-  50% {
-    opacity: 0;
+.thinking .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  opacity: 0.35;
+  animation: breathe 1.4s ease-in-out infinite;
+}
+
+.thinking .dot:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.thinking .dot:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+.thinking-label {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--t4);
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
   }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* 流式输出也用 Markdown 排版 */
+.ai-text.md :deep(p) {
+  margin: 0 0 12px;
+}
+
+.ai-text.md :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.ai-text.md :deep(ul),
+.ai-text.md :deep(ol) {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+
+.ai-text.md :deep(code) {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.ai-text.md :deep(pre) {
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0 0 12px;
+}
+
+.ai-text.md :deep(pre code) {
+  background: none;
+  border: none;
+  padding: 0;
 }
 
 .chat-error {
@@ -576,6 +707,13 @@ async function stop(): Promise<void> {
   color: var(--t2);
 }
 
+.attach-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: cover;
+}
+
 .attach-x {
   color: var(--t4);
   font-size: 9px;
@@ -590,7 +728,7 @@ async function stop(): Promise<void> {
   margin: 0 auto;
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
-  background: #fff;
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   min-height: 96px;
@@ -608,12 +746,12 @@ async function stop(): Promise<void> {
   left: 0;
   right: 0;
   bottom: calc(100% + 6px);
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--line-2);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
   padding: 4px;
-  max-height: 260px;
+  max-height: 380px;
   overflow-y: auto;
   z-index: 20;
 }

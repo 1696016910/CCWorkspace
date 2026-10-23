@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSessionStore } from '@/stores/session'
 import type { SessionSummary } from '@shared/types'
@@ -8,6 +8,11 @@ const emit = defineEmits<{ 'open-settings': []; 'open-trash': [] }>()
 
 const ws = useWorkspaceStore()
 const sessions = useSessionStore()
+
+onMounted(async () => {
+  theme.value = await window.api.theme.get()
+  document.documentElement.dataset.theme = theme.value
+})
 
 interface Group {
   workspaceId: string
@@ -38,6 +43,36 @@ async function newChat(): Promise<void> {
 /** 在工作区名称右侧直接新建会话（Qoder 式） */
 async function newChatIn(workspaceId: string): Promise<void> {
   await sessions.create(workspaceId)
+}
+
+/* ── 主题切换 ── */
+const theme = ref<'light' | 'dark'>('light')
+
+async function toggleTheme(): Promise<void> {
+  theme.value = theme.value === 'light' ? 'dark' : 'light'
+  document.documentElement.dataset.theme = theme.value
+  await window.api.theme.set(theme.value)
+}
+
+/* ── 工作区重命名 ── */
+const renamingWsId = ref<string | null>(null)
+const wsRenameDraft = ref('')
+
+function startWsRename(id: string, name: string): void {
+  renamingWsId.value = id
+  wsRenameDraft.value = name
+  void nextTick(() => {
+    const el = document.querySelector<HTMLInputElement>('.ws-rename')
+    el?.focus()
+    el?.select()
+  })
+}
+
+async function commitWsRename(id: string): Promise<void> {
+  if (renamingWsId.value !== id) return
+  const name = wsRenameDraft.value.trim()
+  renamingWsId.value = null
+  if (name) await ws.rename(id, name)
 }
 
 /* ── 重命名：Electron 不支持 window.prompt，改用内联输入 ── */
@@ -102,8 +137,30 @@ function relativeTime(iso: string): string {
           <span class="fico">
             <svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z" /></svg>
           </span>
-          <span class="wname">{{ g.name }}</span>
+          <span class="wtext">
+            <input
+              v-if="renamingWsId === g.workspaceId"
+              ref="wsRenameInput"
+              v-model="wsRenameDraft"
+              class="ws-rename"
+              @click.stop
+              @keydown.enter.prevent="commitWsRename(g.workspaceId)"
+              @keydown.esc.prevent="renamingWsId = null"
+              @blur="commitWsRename(g.workspaceId)"
+            />
+            <template v-else>
+              <span class="wname">{{ g.name }}</span>
+              <span class="wpath" :title="g.path">{{ g.path }}</span>
+            </template>
+          </span>
           <span class="wcnt">{{ g.sessions.length }}</span>
+          <button
+            class="ws-add"
+            title="重命名工作区"
+            @click.stop="startWsRename(g.workspaceId, g.name)"
+          >
+            ✎
+          </button>
           <button
             class="ws-add"
             title="在此工作区新建会话"
@@ -156,6 +213,16 @@ function relativeTime(iso: string): string {
     </div>
 
     <div class="side-foot">
+      <button class="foot-btn" @click="toggleTheme">
+        <svg v-if="theme === 'light'" viewBox="0 0 24 24">
+          <path d="M20 14.5A8.5 8.5 0 019.5 4 8.5 8.5 0 1020 14.5z" />
+        </svg>
+        <svg v-else viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4" />
+        </svg>
+        {{ theme === 'light' ? '暗色模式' : '浅色模式' }}
+      </button>
       <button class="foot-btn" @click="emit('open-trash')">
         <svg viewBox="0 0 24 24">
           <path d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13" />
@@ -296,13 +363,43 @@ function relativeTime(iso: string): string {
   stroke-linejoin: round;
 }
 
-.wname {
+.wtext {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.wname {
+  flex: none;
   font-size: 13px;
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wpath {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--t4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.ws-rename {
+  width: 100%;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--green);
+  border-radius: 4px;
+  background: var(--surface);
+  font-size: 12.5px;
+  color: var(--t1);
 }
 
 .wcnt {
@@ -422,7 +519,7 @@ function relativeTime(iso: string): string {
   padding: 0 5px;
   border: 1px solid var(--green);
   border-radius: 4px;
-  background: #fff;
+  background: var(--surface);
   font-size: 12.5px;
   color: var(--t1);
 }

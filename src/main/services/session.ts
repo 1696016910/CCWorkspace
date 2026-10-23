@@ -125,6 +125,20 @@ export function restoreSession(id: string): void {
   getDb().prepare('UPDATE sessions SET deleted_at = NULL WHERE id = ?').run(id)
 }
 
+/** 彻底删除：连消息一起从数据库中移除，不可恢复 */
+export function purgeSession(id: string): void {
+  const db = getDb()
+  db.exec('BEGIN')
+  try {
+    db.prepare('DELETE FROM messages WHERE session_id = ?').run(id)
+    db.prepare('DELETE FROM sessions WHERE id = ?').run(id)
+    db.exec('COMMIT')
+  } catch (e) {
+    db.exec('ROLLBACK')
+    throw e
+  }
+}
+
 /** 复制会话：连同消息一起复制，生成新的 id */
 export function duplicateSession(id: string): SessionSummary {
   const db = getDb()

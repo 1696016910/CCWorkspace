@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { ChatMessage } from '@shared/types'
+import { extractFilePaths, renderMarkdown } from '@/utils/markdown'
 
 const props = defineProps<{ message: ChatMessage }>()
 
@@ -8,11 +9,21 @@ const expanded = ref(false)
 
 const isUser = computed(() => props.message.role === 'user')
 const hasTools = computed(() => (props.message.tools?.length ?? 0) > 0)
+const html = computed(() => renderMarkdown(props.message.text))
+const files = computed(() => extractFilePaths(props.message.text))
 
 function time(iso?: string): string {
   if (!iso) return ''
   const d = new Date(iso)
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+async function openFile(path: string): Promise<void> {
+  try {
+    await window.api.file.open(path)
+  } catch {
+    // 文件不存在时忽略，避免打断阅读
+  }
 }
 </script>
 
@@ -27,7 +38,12 @@ function time(iso?: string): string {
       <span class="tm">{{ time(message.timestamp) }}</span>
     </div>
 
-    <button v-if="hasTools" class="done-chip" :class="{ open: expanded }" @click="expanded = !expanded">
+    <button
+      v-if="hasTools"
+      class="done-chip"
+      :class="{ open: expanded }"
+      @click="expanded = !expanded"
+    >
       <span class="chev">›</span> 已处理 · {{ message.tools?.length }} 步
     </button>
     <div v-if="hasTools && expanded" class="steps">
@@ -38,7 +54,15 @@ function time(iso?: string): string {
       </div>
     </div>
 
-    <div class="ai-text">{{ message.text }}</div>
+    <!-- eslint-disable-next-line vue/no-v-html -- 已经过 DOMPurify 净化 -->
+    <div class="ai-text md" v-html="html" />
+
+    <div v-if="files.length" class="files">
+      <button v-for="f in files" :key="f" class="file-chip" :title="f" @click="openFile(f)">
+        <svg viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z" /><path d="M13 3.5v5h5" /></svg>
+        {{ f.split(/[\\/]/).pop() }}
+      </button>
+    </div>
   </div>
 </template>
 
@@ -55,7 +79,7 @@ function time(iso?: string): string {
   padding: 11px 15px;
   font-size: 13.5px;
   line-height: 20px;
-  color: #28282b;
+  color: var(--t1);
   max-width: 76%;
   word-break: break-word;
   white-space: pre-wrap;
@@ -94,7 +118,7 @@ function time(iso?: string): string {
   margin-bottom: 14px;
   border-radius: 7px;
   border: 1px solid var(--line-2);
-  background: #fff;
+  background: var(--surface);
   font-size: 12.5px;
   color: var(--t2);
   transition: background 0.12s;
@@ -156,11 +180,163 @@ function time(iso?: string): string {
   white-space: nowrap;
 }
 
+/* Markdown 正文 */
 .ai-text {
   font-size: 13.5px;
   line-height: 23px;
   color: var(--t1);
-  white-space: pre-wrap;
   word-break: break-word;
+}
+
+.ai-text :deep(p) {
+  margin: 0 0 12px;
+}
+
+.ai-text :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.ai-text :deep(h1),
+.ai-text :deep(h2),
+.ai-text :deep(h3),
+.ai-text :deep(h4) {
+  margin: 18px 0 8px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ai-text :deep(h1) {
+  font-size: 18px;
+}
+
+.ai-text :deep(h2) {
+  font-size: 16px;
+}
+
+.ai-text :deep(h3) {
+  font-size: 14.5px;
+}
+
+.ai-text :deep(h4) {
+  font-size: 13.5px;
+}
+
+.ai-text :deep(ul),
+.ai-text :deep(ol) {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+
+.ai-text :deep(li) {
+  margin-bottom: 4px;
+}
+
+.ai-text :deep(li > p) {
+  margin: 0;
+}
+
+.ai-text :deep(code) {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.ai-text :deep(pre) {
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0 0 12px;
+}
+
+.ai-text :deep(pre code) {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.ai-text :deep(blockquote) {
+  border-left: 3px solid var(--line-3);
+  padding: 2px 0 2px 14px;
+  margin: 0 0 12px;
+  color: var(--t2);
+}
+
+.ai-text :deep(table) {
+  border-collapse: collapse;
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  width: 100%;
+}
+
+.ai-text :deep(th),
+.ai-text :deep(td) {
+  border: 1px solid var(--line-2);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.ai-text :deep(th) {
+  background: var(--bg-soft);
+  font-weight: 500;
+}
+
+.ai-text :deep(a) {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.ai-text :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.ai-text :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 16px 0;
+}
+
+/* 文件链接 */
+.files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t2);
+  transition: all 0.12s;
+}
+
+.file-chip:hover {
+  border-color: var(--green);
+  color: var(--green-t);
+}
+
+.file-chip svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 </style>

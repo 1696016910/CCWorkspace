@@ -91,7 +91,7 @@ onMounted(load)
   padding: 13px;
   border: 1px solid var(--line-2);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   transition: border-color 0.12s, box-shadow 0.12s;
 }
 

@@ -30,12 +30,25 @@ const api = {
     pickFiles: (): Promise<string[]> => ipcRenderer.invoke('dialog:pickFiles')
   },
 
+  theme: {
+    get: (): Promise<'light' | 'dark'> => ipcRenderer.invoke('theme:get'),
+    set: (theme: 'light' | 'dark'): Promise<void> => ipcRenderer.invoke('theme:set', theme)
+  },
+
+  file: {
+    open: (path: string): Promise<void> => ipcRenderer.invoke('file:open', path),
+    savePaste: (name: string, base64: string): Promise<string> =>
+      ipcRenderer.invoke('file:savePaste', name, base64)
+  },
+
   workspace: {
     list: (): Promise<Workspace[]> => ipcRenderer.invoke('workspace:list'),
     add: (dir: string): Promise<Workspace[]> => ipcRenderer.invoke('workspace:add', dir),
     remove: (id: string): Promise<Workspace[]> => ipcRenderer.invoke('workspace:remove', id),
     getDefault: (): Promise<string | null> => ipcRenderer.invoke('workspace:getDefault'),
     setDefault: (id: string | null): Promise<void> => ipcRenderer.invoke('workspace:setDefault', id),
+    rename: (id: string, name: string): Promise<Workspace[]> =>
+      ipcRenderer.invoke('workspace:rename', id, name),
     pick: (): Promise<string | null> => ipcRenderer.invoke('workspace:pick')
   },
 
@@ -49,6 +62,7 @@ const api = {
       ipcRenderer.invoke('session:rename', id, title),
     remove: (id: string): Promise<void> => ipcRenderer.invoke('session:remove', id),
     restore: (id: string): Promise<void> => ipcRenderer.invoke('session:restore', id),
+    purge: (id: string): Promise<void> => ipcRenderer.invoke('session:purge', id),
     duplicate: (id: string): Promise<SessionSummary> => ipcRenderer.invoke('session:duplicate', id)
   },
 

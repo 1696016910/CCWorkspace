@@ -5,6 +5,8 @@
   --bg-select: #e7e7e9;
   --bg-soft: #f5f5f6;
   --bg-bubble: #f0f0f0;
+  --surface: #ffffff;
+  --surface-2: #fcfcfd;
 
   --line: #e6e6e8;
   --line-2: #dcdcde;
@@ -313,4 +315,79 @@ textarea {
   margin-top: 10px;
   font-size: 12px;
   color: var(--red);
+}
+
+/* ── 暗色主题 ── */
+:root[data-theme='dark'] {
+  --bg: #1a1a1d;
+  --bg-bar: #141417;
+  --bg-hover: #26262b;
+  --bg-select: #2e2e35;
+  --bg-soft: #212126;
+  --bg-bubble: #2a2a31;
+  --surface: #212126;
+  --surface-2: #26262b;
+
+  --line: #2a2a30;
+  --line-2: #33333a;
+  --line-3: #3d3d45;
+
+  --t1: #e8e8ec;
+  --t2: #a8a8b2;
+  --t3: #75757f;
+  --t4: #55555e;
+
+  --green: #3f7d5c;
+  --green-h: #487f61;
+  --green-t: #79bd93;
+  --green-soft: #1e2b23;
+  --red: #e06c66;
+  --blue: #5c9ee0;
+}
+
+:root[data-theme='dark'] body {
+  color-scheme: dark;
+}
+
+:root[data-theme='dark'] .st-cardx,
+:root[data-theme='dark'] .card,
+:root[data-theme='dark'] .composer,
+:root[data-theme='dark'] .env-table,
+:root[data-theme='dark'] .st-sel,
+:root[data-theme='dark'] .st-btn,
+:root[data-theme='dark'] .add-row,
+:root[data-theme='dark'] .mini,
+:root[data-theme='dark'] .cmd-panel,
+:root[data-theme='dark'] .pop {
+  background: #212126;
+}
+
+:root[data-theme='dark'] .st-rowx:hover,
+:root[data-theme='dark'] .env-tr:hover,
+:root[data-theme='dark'] .card:hover {
+  background: #26262b;
+}
+
+:root[data-theme='dark'] .st-notice.info {
+  background: #1c2430;
+  border-color: #2a3a4d;
+  color: #8fa8c4;
+}
+
+:root[data-theme='dark'] .st-notice.warn {
+  background: #2a1e1e;
+  border-color: #3d2a2a;
+  color: #c49793;
+}
+
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: #3a3a42;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+  background: #4a4a54;
+  border: 3px solid transparent;
+  background-clip: content-box;
 }

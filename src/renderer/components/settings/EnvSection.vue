@@ -111,7 +111,7 @@ onMounted(load)
   border: 1px solid var(--line-2);
   border-radius: 8px;
   overflow: hidden;
-  background: #fff;
+  background: var(--surface);
 }
 
 .env-head,
@@ -138,7 +138,7 @@ onMounted(load)
 }
 
 .env-tr:hover {
-  background: #fcfcfd;
+  background: var(--surface-2);
 }
 
 .env-tr input {
@@ -216,7 +216,7 @@ onMounted(load)
   padding: 9px 12px;
   border-radius: 8px;
   font-size: 12px;
-  background: #f2f8f4;
+  background: var(--surface-2);
   border: 1px solid #d6e8dc;
   color: var(--green-t);
 }

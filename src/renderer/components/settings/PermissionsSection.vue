@@ -129,7 +129,7 @@ onMounted(load)
   padding: 0 8px;
   border-radius: var(--r);
   border: 1px solid var(--line-3);
-  background: #fcfcfc;
+  background: var(--surface-2);
   font-size: 12px;
   color: var(--t1);
   font-family: inherit;
@@ -149,7 +149,7 @@ onMounted(load)
 }
 
 .rule-row:hover {
-  background: #fcfcfd;
+  background: var(--surface-2);
 }
 
 .rule-row .mono {
@@ -182,7 +182,7 @@ onMounted(load)
   border-radius: var(--r);
   font-family: var(--mono);
   font-size: 11.5px;
-  background: #fcfcfc;
+  background: var(--surface-2);
 }
 
 .add-rule input:focus {
