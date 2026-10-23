@@ -87,6 +87,11 @@ export const useChatStore = defineStore('chat', () => {
     streaming.value = false
   }
 
+  /** 压缩当前会话的上下文 */
+  async function compact(sessionId: string): Promise<void> {
+    await window.api.context.compact(sessionId)
+  }
+
   return {
     streaming,
     streamText,
@@ -96,6 +101,7 @@ export const useChatStore = defineStore('chat', () => {
     activeSessionId,
     listen,
     send,
-    stop
+    stop,
+    compact
   }
 })

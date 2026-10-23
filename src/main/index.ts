@@ -18,7 +18,7 @@ import {
   renameSession,
   restoreSession
 } from './services/session'
-import { interrupt, send } from './services/chat'
+import { compact, getContextUsage, interrupt, listCommands, send } from './services/chat'
 import {
   readEnv,
   readModels,
@@ -28,7 +28,7 @@ import {
   savePermissions,
   testConnection
 } from './services/claudeSettings'
-import { listSkills, toggleSkill } from './services/skills'
+import { listSkills, slashCandidates, toggleSkill } from './services/skills'
 import {
   addMarketplace,
   installPlugin,
@@ -89,6 +89,39 @@ function handle(channel: string, fn: (...args: never[]) => unknown): void {
 function registerIpc(): void {
   handle('app:ping', () => 'pong')
 
+  /* 窗口控制 */
+  handle('window:minimize', () => mainWindow?.minimize())
+  handle('window:maximize', () => {
+    if (!mainWindow) return
+    if (mainWindow.isMaximized()) mainWindow.unmaximize()
+    else mainWindow.maximize()
+  })
+  handle('window:close', () => mainWindow?.close())
+  handle('window:isMaximized', () => mainWindow?.isMaximized() ?? false)
+
+  /* 原生确认对话框（渲染层 window.confirm 在 Electron 中不可用） */
+  handle('dialog:confirm', async (message: string) => {
+    if (!mainWindow) return false
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      buttons: ['取消', '确定'],
+      defaultId: 1,
+      cancelId: 0,
+      message
+    })
+    return response === 1
+  })
+
+  /* 打开文件选择器，返回选中的文件路径 */
+  handle('dialog:pickFiles', async () => {
+    if (!mainWindow) return []
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections'],
+      title: '选择文件'
+    })
+    return result.canceled ? [] : result.filePaths
+  })
+
   /* 工作区 */
   handle('workspace:list', () => listWorkspaces())
   handle('workspace:add', (dir: string) => addWorkspace(dir))
@@ -125,6 +158,28 @@ function registerIpc(): void {
     void send(sessionId, text, workspace.path, skills)
   })
   handle('chat:interrupt', () => interrupt())
+
+  /* 上下文与命令 */
+  handle('context:usage', (sessionId: string) => getContextUsage(sessionId))
+  handle('context:compact', async (sessionId: string) => {
+    const session = listSessions().find((s) => s.id === sessionId)
+    if (!session) throw new Error('会话不存在')
+    const workspace = listWorkspaces().find((w) => w.id === session.workspaceId)
+    if (!workspace) throw new Error('会话所属工作区已被移除')
+    const skills = (await listSkills(workspace.path)).filter((s) => s.enabled).map((s) => s.name)
+    await compact(sessionId, workspace.path, skills)
+  })
+  handle('commands:list', async (sessionId: string) => {
+    // 优先用 SDK 在首轮 init 中给出的完整清单；没有则退回本地扫描
+    const cached = await listCommands()
+    if (cached.length > 0) return cached
+
+    const session = listSessions().find((s) => s.id === sessionId)
+    const workspace = session
+      ? listWorkspaces().find((w) => w.id === session.workspaceId)
+      : undefined
+    return slashCandidates(workspace?.path ?? null)
+  })
 
   /* 配置 */
   handle('config:readEnv', () => readEnv())

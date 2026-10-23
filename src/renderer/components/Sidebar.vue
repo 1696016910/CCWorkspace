@@ -35,6 +35,11 @@ async function newChat(): Promise<void> {
   await sessions.create(ws.current?.id ?? null)
 }
 
+/** 在工作区名称右侧直接新建会话（Qoder 式） */
+async function newChatIn(workspaceId: string): Promise<void> {
+  await sessions.create(workspaceId)
+}
+
 /* ── 重命名：Electron 不支持 window.prompt，改用内联输入 ── */
 const renamingId = ref<string | null>(null)
 const renameDraft = ref('')
@@ -99,6 +104,13 @@ function relativeTime(iso: string): string {
           </span>
           <span class="wname">{{ g.name }}</span>
           <span class="wcnt">{{ g.sessions.length }}</span>
+          <button
+            class="ws-add"
+            title="在此工作区新建会话"
+            @click.stop="newChatIn(g.workspaceId)"
+          >
+            ＋
+          </button>
         </div>
 
         <div v-show="!ws.isCollapsed(g.workspaceId)" class="ws-body">
@@ -297,6 +309,31 @@ function relativeTime(iso: string): string {
   font-size: 11px;
   color: var(--t4);
   flex: none;
+}
+
+.ws-add {
+  display: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--t3);
+  font-size: 13px;
+  line-height: 1;
+  flex: none;
+  place-items: center;
+}
+
+.ws-head:hover .ws-add {
+  display: grid;
+}
+
+.ws-head:hover .wcnt {
+  display: none;
+}
+
+.ws-add:hover {
+  background: #e0e0e3;
+  color: var(--t1);
 }
 
 .ws-body {

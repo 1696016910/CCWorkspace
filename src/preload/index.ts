@@ -1,11 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   ChatMessage,
+  ContextUsageDetail,
   EnvEntry,
   MarketplaceInfo,
   PluginInfo,
   SessionSummary,
   SkillInfo,
+  SlashCommandInfo,
   Workspace
 } from '../shared/types'
 
@@ -15,6 +17,18 @@ import type {
  */
 const api = {
   ping: (): Promise<string> => ipcRenderer.invoke('app:ping'),
+
+  window: {
+    minimize: (): Promise<void> => ipcRenderer.invoke('window:minimize'),
+    maximize: (): Promise<void> => ipcRenderer.invoke('window:maximize'),
+    close: (): Promise<void> => ipcRenderer.invoke('window:close'),
+    isMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:isMaximized')
+  },
+
+  dialog: {
+    confirm: (message: string): Promise<boolean> => ipcRenderer.invoke('dialog:confirm', message),
+    pickFiles: (): Promise<string[]> => ipcRenderer.invoke('dialog:pickFiles')
+  },
 
   workspace: {
     list: (): Promise<Workspace[]> => ipcRenderer.invoke('workspace:list'),
@@ -47,6 +61,21 @@ const api = {
       ipcRenderer.on('chat:event', listener)
       return () => ipcRenderer.removeListener('chat:event', listener)
     }
+  },
+
+  context: {
+    /** 上下文用量明细（token 数与百分比） */
+    usage: (sessionId: string): Promise<ContextUsageDetail> =>
+      ipcRenderer.invoke('context:usage', sessionId),
+    /** 压缩当前会话的上下文 */
+    compact: (sessionId: string): Promise<void> =>
+      ipcRenderer.invoke('context:compact', sessionId)
+  },
+
+  commands: {
+    /** 会话可用的斜杠命令与 Skill */
+    list: (sessionId: string): Promise<SlashCommandInfo[]> =>
+      ipcRenderer.invoke('commands:list', sessionId)
   },
 
   config: {

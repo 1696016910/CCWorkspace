@@ -14,6 +14,10 @@ interface SessionRow {
   updated_at: string
   deleted_at: string | null
   message_count: number
+  claude_session_id: string | null
+  context_tokens: number
+  context_max: number
+  context_percent: number
 }
 
 interface MessageRow {
@@ -32,7 +36,9 @@ function toSummary(row: SessionRow): SessionSummary {
     updatedAt: row.updated_at,
     messageCount: row.message_count,
     running: false,
-    renamed: row.auto_title === 0
+    renamed: row.auto_title === 0,
+    contextPercent: row.context_percent ?? 0,
+    contextTokens: row.context_tokens ?? 0
   }
 }
 
@@ -48,6 +54,7 @@ export function listSessions(): SessionSummary[] {
   const rows = getDb()
     .prepare(
       `SELECT s.id, s.workspace_id, s.title, s.auto_title, s.created_at, s.updated_at, s.deleted_at,
+              s.claude_session_id, s.context_tokens, s.context_max, s.context_percent,
               (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count
          FROM sessions s
         WHERE s.deleted_at IS NULL
@@ -61,6 +68,7 @@ export function listDeletedSessions(): SessionSummary[] {
   const rows = getDb()
     .prepare(
       `SELECT s.id, s.workspace_id, s.title, s.auto_title, s.created_at, s.updated_at, s.deleted_at,
+              s.claude_session_id, s.context_tokens, s.context_max, s.context_percent,
               (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count
          FROM sessions s
         WHERE s.deleted_at IS NOT NULL
@@ -89,6 +97,7 @@ export function createSession(workspaceId: string | null): SessionSummary {
   const row = getDb()
     .prepare(
       `SELECT s.id, s.workspace_id, s.title, s.auto_title, s.created_at, s.updated_at, s.deleted_at,
+              s.claude_session_id, s.context_tokens, s.context_max, s.context_percent,
               0 AS message_count
          FROM sessions s WHERE s.id = ?`
     )
@@ -152,6 +161,7 @@ export function duplicateSession(id: string): SessionSummary {
   const row = db
     .prepare(
       `SELECT s.id, s.workspace_id, s.title, s.auto_title, s.created_at, s.updated_at, s.deleted_at,
+              s.claude_session_id, s.context_tokens, s.context_max, s.context_percent,
               (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count
          FROM sessions s WHERE s.id = ?`
     )
@@ -203,3 +213,33 @@ export function appendMessage(
 
   return { id, role, text: content, tools, timestamp: now }
 }
+
+/** 取得会话绑定的 Claude CLI 会话 id（用于 resume 续接上下文） */
+export function getClaudeSessionId(sessionId: string): string | null {
+  const row = getDb()
+    .prepare('SELECT claude_session_id FROM sessions WHERE id = ?')
+    .get(sessionId) as { claude_session_id?: string | null } | undefined
+  return row?.claude_session_id ?? null
+}
+
+/** 记住 CLI 返回的会话 id，后续轮次用它 resume */
+export function setClaudeSessionId(sessionId: string, claudeSessionId: string): void {
+  getDb()
+    .prepare('UPDATE sessions SET claude_session_id = ? WHERE id = ?')
+    .run(claudeSessionId, sessionId)
+}
+
+/** 持久化上下文用量 */
+export function setContextUsage(
+  sessionId: string,
+  tokens: number,
+  max: number,
+  percent: number
+): void {
+  getDb()
+    .prepare(
+      'UPDATE sessions SET context_tokens = ?, context_max = ?, context_percent = ? WHERE id = ?'
+    )
+    .run(tokens, max, percent, sessionId)
+}
+

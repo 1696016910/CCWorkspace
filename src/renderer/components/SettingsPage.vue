@@ -8,7 +8,12 @@ import SkillsSection from './settings/SkillsSection.vue'
 import PluginsSection from './settings/PluginsSection.vue'
 import MarketplacesSection from './settings/MarketplacesSection.vue'
 
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{
+  close: []
+  minimize: []
+  maximize: []
+  'close-app': []
+}>()
 
 const TABS = [
   { id: 'ws', label: '工作区', group: '工作' },
@@ -38,9 +43,17 @@ function labelOf(id: TabId): string {
 <template>
   <div class="settings">
     <div class="st-bar">
-      <button class="back" @click="emit('close')" title="返回">←</button>
+      <button class="back" type="button" @click.stop.prevent="emit('close')" title="返回主界面">
+        <span class="arrow">←</span>
+        <span class="back-label">返回</span>
+      </button>
       <span class="st-title">设置</span>
       <span class="sp" />
+      <div class="wctl">
+        <button title="最小化" @click="emit('minimize')">—</button>
+        <button title="最大化" @click="emit('maximize')">□</button>
+        <button class="close" title="关闭" @click="emit('close-app')">✕</button>
+      </div>
     </div>
     <div class="st-body">
       <nav class="st-nav">
@@ -91,18 +104,58 @@ function labelOf(id: TabId): string {
   border-bottom: 1px solid var(--line);
 }
 
+.st-bar {
+  -webkit-app-region: drag;
+}
+
 .st-bar .back {
-  width: 26px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   height: 26px;
+  padding: 0 10px 0 8px;
   border-radius: 5px;
-  display: grid;
-  place-items: center;
-  color: var(--t2);
-  font-size: 13px;
+  border: 1px solid var(--line-2);
+  background: #fff;
+  color: var(--t1);
+  font-size: 12.5px;
+  -webkit-app-region: no-drag;
+  cursor: pointer;
 }
 
 .st-bar .back:hover {
   background: var(--bg-hover);
+  border-color: var(--line-3);
+}
+
+.st-bar .arrow {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.wctl {
+  display: flex;
+  -webkit-app-region: no-drag;
+}
+
+.wctl button {
+  width: 32px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  color: var(--t3);
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.wctl button:hover {
+  background: var(--bg-hover);
+  color: var(--t1);
+}
+
+.wctl button.close:hover {
+  background: #e81123;
+  color: #fff;
 }
 
 .st-bar .st-title {

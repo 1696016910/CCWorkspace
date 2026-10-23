@@ -96,3 +96,54 @@ export async function toggleSkill(name: string, enabled: boolean): Promise<void>
 export function enabledSkillNames(all: SkillInfo[]): string[] {
   return all.filter((s) => s.enabled).map((s) => s.name)
 }
+
+/**
+ * 斜杠命令候选。
+ *
+ * Claude 的 /help 类内置命令不在文件系统里，这里只列出
+ * 用户可调用的 Skill 与自定义命令，作为输入 / 时的候选。
+ */
+export async function slashCandidates(
+  projectDir: string | null
+): Promise<{ name: string; description: string; argumentHint: string; builtin: boolean }[]> {
+  const skills = await listSkills(projectDir)
+  const fromSkills = skills.map((s) => ({
+    name: s.name,
+    description: s.description,
+    argumentHint: '',
+    builtin: false
+  }))
+
+  const commands = await scanCommands(join(claudeDir(), 'commands'), 'user')
+  return [...fromSkills, ...commands]
+}
+
+/** 扫描 ~/.claude/commands/*.md */
+async function scanCommands(
+  dir: string,
+  _scope: string
+): Promise<{ name: string; description: string; argumentHint: string; builtin: boolean }[]> {
+  let entries
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const out: { name: string; description: string; argumentHint: string; builtin: boolean }[] = []
+  for (const e of entries) {
+    if (!e.isFile() || !e.name.endsWith('.md')) continue
+    try {
+      const text = await readFile(join(dir, e.name), 'utf-8')
+      const fm = parseFrontmatter(text)
+      out.push({
+        name: e.name.replace(/\.md$/, ''),
+        description: fm.description || '',
+        argumentHint: '',
+        builtin: false
+      })
+    } catch {
+      // 单个命令读取失败不影响列表
+    }
+  }
+  return out
+}

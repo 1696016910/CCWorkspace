@@ -20,6 +20,10 @@ export interface SessionSummary {
   running: boolean
   /** 是否为用户手动命名 */
   renamed: boolean
+  /** 上下文占用百分比 0-100+ */
+  contextPercent: number
+  /** 上下文已用 token */
+  contextTokens: number
 }
 
 /** 对话流中的一条消息 */
@@ -43,6 +47,24 @@ export interface ToolCall {
 export interface ContextUsage {
   inputTokens: number
   outputTokens: number
+}
+
+/** 上下文明细：总量、窗口、百分比与分类 */
+export interface ContextUsageDetail {
+  model: string
+  totalTokens: number
+  maxTokens: number
+  /** 0-100+，超过 100 表示已超窗口 */
+  percentage: number
+  categories: { name: string; tokens: number; kind: string }[]
+}
+
+/** 斜杠命令或 Skill */
+export interface SlashCommandInfo {
+  name: string
+  description: string
+  argumentHint: string
+  builtin: boolean
 }
 
 /** 应用自身状态，持久化在 userData/config.json */

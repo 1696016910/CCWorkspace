@@ -5,7 +5,7 @@
  * 迁移只增不改——已发布的版本不再修改，避免用户库结构漂移。
  */
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 export const MIGRATIONS: Record<number, string> = {
   1: `
@@ -45,5 +45,16 @@ export const MIGRATIONS: Record<number, string> = {
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+  `,
+
+  /**
+   * 记录每个会话对应的 Claude CLI 会话 id。
+   * SDK 的 resume 需要它来续接上下文，否则每轮都是全新的对话。
+   */
+  2: `
+    ALTER TABLE sessions ADD COLUMN claude_session_id TEXT;
+    ALTER TABLE sessions ADD COLUMN context_tokens INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE sessions ADD COLUMN context_max INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE sessions ADD COLUMN context_percent REAL NOT NULL DEFAULT 0;
   `
 }

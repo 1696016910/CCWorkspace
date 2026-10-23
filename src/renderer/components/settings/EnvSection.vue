@@ -3,16 +3,11 @@ import { onMounted, ref } from 'vue'
 import type { EnvEntry } from '@shared/types'
 
 const entries = ref<EnvEntry[]>([])
-const revealed = ref<Set<number>>(new Set())
 const saving = ref(false)
 const message = ref<string | null>(null)
 const isError = ref(false)
 const testResult = ref<{ ok: boolean; message: string; ms: number } | null>(null)
 const testing = ref(false)
-
-function isSecret(key: string): boolean {
-  return /(_TOKEN|_KEY|_SECRET)$/i.test(key)
-}
 
 async function load(): Promise<void> {
   try {
@@ -53,13 +48,6 @@ function flash(text: string, err: boolean): void {
   }, 4000)
 }
 
-function toggleReveal(i: number): void {
-  const next = new Set(revealed.value)
-  if (next.has(i)) next.delete(i)
-  else next.add(i)
-  revealed.value = next
-}
-
 function addRow(): void {
   entries.value.push({ key: '', value: '' })
 }
@@ -86,15 +74,8 @@ onMounted(load)
       </div>
       <div v-for="(e, i) in entries" :key="i" class="env-tr">
         <input v-model="e.key" class="k" placeholder="KEY_NAME" />
-        <input
-          v-model="e.value"
-          :type="isSecret(e.key) && !revealed.has(i) ? 'password' : 'text'"
-          placeholder="value"
-        />
+        <input v-model="e.value" placeholder="value" />
         <div class="act">
-          <button v-if="isSecret(e.key)" class="mbtn" @click="toggleReveal(i)">
-            {{ revealed.has(i) ? '◌' : '◉' }}
-          </button>
           <button class="mbtn del" @click="removeRow(i)">✕</button>
         </div>
       </div>
