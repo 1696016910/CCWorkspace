@@ -142,6 +142,8 @@ onMounted(() => {
     onFinish: (id) => {
       sessions.setRunning(id, false)
       if (chat.error) toast.error(chat.error)
+      // 生成结束后把焦点还给输入框
+      void nextTick(() => textarea.value?.focus())
     },
     onCommands: async (id) => {
       commands.value = await window.api.commands.list(id)
@@ -272,6 +274,34 @@ async function onPaste(e: ClipboardEvent): Promise<void> {
   if (handled) e.preventDefault()
 }
 
+/* ── 拖拽文件 ── */
+const dragOver = ref(false)
+
+function onDragOver(e: DragEvent): void {
+  if (!e.dataTransfer?.types.includes('Files')) return
+  e.preventDefault()
+  dragOver.value = true
+}
+
+function onDragLeave(e: DragEvent): void {
+  const el = e.currentTarget as HTMLElement
+  // 只有真正离开容器时才取消高亮
+  if (e.relatedTarget && el.contains(e.relatedTarget as Node)) return
+  dragOver.value = false
+}
+
+function onDrop(e: DragEvent): void {
+  e.preventDefault()
+  dragOver.value = false
+  const files = Array.from(e.dataTransfer?.files ?? [])
+  if (!files.length) return
+  // Electron 给 File 对象加了 path 属性，直接拿真实路径
+  const paths = files
+    .map((f) => (f as File & { path?: string }).path)
+    .filter((p): p is string => typeof p === 'string' && p.length > 0)
+  if (paths.length) attachments.value = [...attachments.value, ...paths]
+}
+
 async function pickFiles(): Promise<void> {
   const files = await window.api.dialog.pickFiles()
   if (files.length) {
@@ -349,6 +379,9 @@ async function loadEarlier(): Promise<void> {
 
 async function stop(): Promise<void> {
   await chat.stop()
+  // 停止后把焦点还给输入框，用户可以立刻继续输入
+  await nextTick()
+  textarea.value?.focus()
 }
 </script>
 
@@ -428,11 +461,18 @@ async function stop(): Promise<void> {
       </div>
     </div>
 
-    <div v-if="current" class="composer-wrap">
+    <div
+      v-if="current"
+      class="composer-wrap"
+      :class="{ 'drag-over': dragOver }"
+      @dragover="onDragOver"
+      @dragleave="onDragLeave"
+      @drop="onDrop"
+    >
       <div v-if="attachments.length" class="attach-row">
         <span v-for="(f, i) in attachments" :key="i" class="attach-chip">
           <img v-if="isImage(f)" :src="fileUrl(f)" class="attach-thumb" alt="" />
-          {{ fileName(f) }}
+          <span class="attach-name" :title="f">{{ fileName(f) }}</span>
           <button class="attach-x" @click="removeAttachment(i)">✕</button>
         </span>
       </div>
@@ -508,6 +548,7 @@ async function stop(): Promise<void> {
   min-width: 0;
   min-height: 0;
   position: relative;
+  overflow: hidden;
 }
 
 .main-head {
@@ -518,6 +559,9 @@ async function stop(): Promise<void> {
   height: 46px;
   padding: 0 24px;
   border-bottom: 1px solid var(--line);
+  /* 窄窗口下标题过长会把右侧按钮挤出可视区 */
+  min-width: 0;
+  overflow: hidden;
 }
 
 .mh-title {
@@ -526,6 +570,8 @@ async function stop(): Promise<void> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .mh-ws {
@@ -750,8 +796,8 @@ async function stop(): Promise<void> {
   margin-top: 12px;
   padding: 10px 13px;
   border-radius: 8px;
-  background: #fdf5f5;
-  border: 1px solid #f2dedd;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-line);
   color: #8a4b47;
   font-size: 12.5px;
   line-height: 1.6;
@@ -827,6 +873,14 @@ async function stop(): Promise<void> {
 .composer-wrap {
   flex: none;
   padding: 6px 28px 16px;
+  transition: background 0.15s;
+}
+
+.composer-wrap.drag-over {
+  background: var(--green-soft);
+  border-radius: 10px;
+  outline: 1px dashed var(--green);
+  outline-offset: -6px;
 }
 
 .attach-row {
@@ -841,6 +895,8 @@ async function stop(): Promise<void> {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
+  min-width: 0;
   height: 24px;
   padding: 0 8px;
   border-radius: 5px;
@@ -848,6 +904,15 @@ async function stop(): Promise<void> {
   border: 1px solid var(--line);
   font-size: 11.5px;
   color: var(--t2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-chip .attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .attach-thumb {

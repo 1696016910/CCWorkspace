@@ -626,8 +626,8 @@ function relativeTime(iso: string): string {
   margin: 10px 8px 0;
   padding: 8px 10px;
   border-radius: var(--r);
-  background: #fdf5f5;
-  border: 1px solid #f2dedd;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-line);
   color: #8a4b47;
   font-size: 11.5px;
   line-height: 1.6;

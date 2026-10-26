@@ -9,9 +9,13 @@ const isError = ref(false)
 const testResult = ref<{ ok: boolean; message: string; ms: number } | null>(null)
 const testing = ref(false)
 
+const healthWarning = ref<string | null>(null)
+
 async function load(): Promise<void> {
   try {
     entries.value = await window.api.config.readEnv()
+    const health = await window.api.config.health()
+    healthWarning.value = health.warning
   } catch (e) {
     flash(e instanceof Error ? e.message : String(e), true)
   }
@@ -66,6 +70,8 @@ onMounted(load)
     <p class="st-subx">
       写入 <code>~/.claude/settings.json</code> 的 <code>env</code>，保存前自动备份。修改后需要重启会话才生效。
     </p>
+
+    <div v-if="healthWarning" class="st-notice warn">{{ healthWarning }}</div>
 
     <div class="env-table">
       <div class="env-head">
@@ -223,7 +229,7 @@ onMounted(load)
 }
 
 .test-result.bad {
-  background: #fdf5f5;
+  background: var(--danger-bg);
   border-color: #f2dedd;
   color: #8a4b47;
 }

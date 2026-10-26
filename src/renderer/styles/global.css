@@ -7,6 +7,10 @@
   --bg-bubble: #f0f0f0;
   --surface: #ffffff;
   --surface-2: #fcfcfd;
+  --danger-bg: #fdf5f5;
+  --danger-soft: #fbeaea;
+  --danger-line: #f2dedd;
+  --success-bg: #f2f8f4;
 
   --line: #e6e6e8;
   --line-2: #dcdcde;
@@ -330,6 +334,10 @@ textarea {
   --bg-bubble: #2a2a31;
   --surface: #212126;
   --surface-2: #26262b;
+  --danger-bg: #2a1e1e;
+  --danger-soft: #332424;
+  --danger-line: #442e2e;
+  --success-bg: #1f2b24;
 
   --line: #2a2a30;
   --line-2: #33333a;

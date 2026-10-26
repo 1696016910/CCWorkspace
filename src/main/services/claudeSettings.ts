@@ -19,15 +19,29 @@ export const MODEL_KEYS = [
   'MAX_THINKING_TOKENS'
 ] as const
 
+/** 最近一次读取是否因文件损坏而降级，供界面提示 */
+let lastReadError: string | null = null
+
+export function getLastReadError(): string | null {
+  return lastReadError
+}
+
 export async function readRaw(): Promise<RawSettings> {
   const p = claudeSettingsPath()
-  if (!(await pathExists(p))) return {}
+  if (!(await pathExists(p))) {
+    lastReadError = null
+    return {}
+  }
   try {
     const text = await readFile(p, 'utf-8')
     const parsed = JSON.parse(text)
+    lastReadError = null
     return typeof parsed === 'object' && parsed !== null ? (parsed as RawSettings) : {}
   } catch {
-    throw new Error('settings.json 解析失败，请先手工修复该文件')
+    // 文件损坏时降级为空配置：让界面仍能打开并提示用户，
+    // 而不是让整个应用不可用。
+    lastReadError = 'settings.json 无法解析，配置以空值展示；修复后请重启应用'
+    return {}
   }
 }
 
@@ -61,11 +75,31 @@ export async function writeSettings(
   if (await pathExists(p)) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
     await copyFile(p, join(claudeBackupsDir(), `settings-${stamp}.json`))
+    await pruneBackups()
   }
 
   const tmp = `${p}.tmp-${Date.now()}`
   await writeFile(tmp, JSON.stringify(next, null, 2), 'utf-8')
   await rename(tmp, p)
+}
+
+/** 只保留最近 20 份备份，避免长期使用后无限堆积 */
+const MAX_BACKUPS = 20
+
+async function pruneBackups(): Promise<void> {
+  try {
+    const { readdir, unlink } = await import('node:fs/promises')
+    const dir = claudeBackupsDir()
+    const files = (await readdir(dir))
+      .filter((f) => f.startsWith('settings-') && f.endsWith('.json'))
+      .sort()
+    const excess = files.length - MAX_BACKUPS
+    for (let i = 0; i < excess; i++) {
+      await unlink(join(dir, files[i]!)).catch(() => {})
+    }
+  } catch {
+    // 清理失败不影响保存
+  }
 }
 
 function envObject(raw: RawSettings): Record<string, string> {

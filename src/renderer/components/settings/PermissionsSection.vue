@@ -213,7 +213,7 @@ onMounted(load)
 }
 
 .mbtn.del:hover {
-  background: #fbeaea;
+  background: var(--danger-soft);
   color: var(--red);
 }
 

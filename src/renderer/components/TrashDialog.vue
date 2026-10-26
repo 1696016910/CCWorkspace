@@ -195,6 +195,6 @@ onUnmounted(() => window.removeEventListener('keydown', onEsc))
 }
 
 .btn.dgr:hover {
-  background: #fbeaea;
+  background: var(--danger-soft);
 }
 </style>

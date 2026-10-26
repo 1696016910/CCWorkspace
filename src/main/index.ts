@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from 'electron'
 import { join } from 'node:path'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { initDb, closeDb } from './db'
@@ -26,6 +26,7 @@ import {
 } from './services/session'
 import { assertCanSend, compact, getContextUsage, interrupt, listCommands, refreshContext, send } from './services/chat'
 import {
+  getLastReadError,
   readEnv,
   readModels,
   readPermissions,
@@ -93,8 +94,32 @@ function saveWindowState(): void {
   }
 }
 
+/**
+ * 校验保存的位置是否仍落在某块屏幕上。
+ * 外接显示器拔掉后，旧坐标会落在屏幕外，窗口将完全不可见。
+ */
+function sanitizeBounds(state: WindowState): WindowState {
+  if (state.x === undefined || state.y === undefined) return state
+  try {
+    const displays = screen.getAllDisplays()
+    const visible = displays.some((d) => {
+      const b = d.workArea
+      return (
+        state.x! >= b.x - 50 &&
+        state.y! >= b.y - 50 &&
+        state.x! < b.x + b.width &&
+        state.y! < b.y + b.height
+      )
+    })
+    if (visible) return state
+  } catch {
+    // 拿不到屏幕信息时按原值处理
+  }
+  return { width: state.width, height: state.height, maximized: state.maximized }
+}
+
 function createWindow(): void {
-  const state = readWindowState()
+  const state = sanitizeBounds(readWindowState())
 
   mainWindow = new BrowserWindow({
     x: state.x,
@@ -359,6 +384,7 @@ function registerIpc(): void {
 
   /* 配置 */
   handle('config:readEnv', () => readEnv())
+  handle('config:health', () => ({ warning: getLastReadError() }))
   handle('config:saveEnv', (entries: EnvEntry[]) => saveEnv(entries))
   handle('config:readPermissions', () => readPermissions())
   handle('config:savePermissions', (p: { defaultMode: string; allow: string[]; deny: string[] }) =>
@@ -400,6 +426,61 @@ function registerIpc(): void {
   })
 }
 
+/**
+ * 单实例锁。
+ *
+ * 两个实例会同时打开同一个 SQLite 文件，写操作互相阻塞甚至损坏，
+ * 因此第二个实例直接把已有窗口唤到前台后退出。
+ */
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.focus()
+  })
+}
+
+/**
+ * 隐藏窗口菜单，但保留编辑类 role。
+ *
+ * Windows 上 Ctrl+C / Ctrl+V / Ctrl+A 等快捷键由菜单项提供；
+ * 完全不设菜单会导致输入框里无法复制粘贴。
+ */
+function installMenu(): void {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: '编辑',
+      submenu: [
+        { role: 'undo', label: '撤销' },
+        { role: 'redo', label: '重做' },
+        { type: 'separator' },
+        { role: 'cut', label: '剪切' },
+        { role: 'copy', label: '复制' },
+        { role: 'paste', label: '粘贴' },
+        { role: 'selectAll', label: '全选' }
+      ]
+    },
+    {
+      label: '视图',
+      submenu: [
+        { role: 'reload', label: '重新加载' },
+        // 开发者工具只在开发构建里出现
+        ...(app.isPackaged
+          ? []
+          : ([{ role: 'toggleDevTools', label: '开发者工具' }] as Electron.MenuItemConstructorOptions[])),
+        { type: 'separator' },
+        { role: 'resetZoom', label: '实际大小' },
+        { role: 'zoomIn', label: '放大' },
+        { role: 'zoomOut', label: '缩小' }
+      ]
+    }
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
 app.whenReady().then(() => {
   try {
     initDb()
@@ -412,6 +493,7 @@ app.whenReady().then(() => {
 请删除用户数据目录下的 workbench.db 后重试。`
     )
   }
+  installMenu()
   registerIpc()
   createWindow()
 

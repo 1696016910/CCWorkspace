@@ -17,6 +17,8 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
+  # 卸载时询问是否一并删除用户数据
+  deleteAppDataOnUninstall: false
 mac:
   target: [dmg]
   category: public.app-category.developer-tools

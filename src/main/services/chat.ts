@@ -22,6 +22,11 @@ export interface Usage {
   percentage: number
 }
 
+/** 单轮输出的安全上限，防止异常模型行为撑爆内存与数据库 */
+const MAX_OUTPUT_CHARS = 400_000
+/** 单轮工具调用记录上限 */
+const MAX_TOOLS = 500
+
 interface ActiveRun {
   abort: () => void
 }
@@ -178,7 +183,7 @@ export async function send(
 
       if (message.type === 'stream_event') {
         const delta = deltaText((message as unknown as { event: unknown }).event)
-        if (delta) {
+        if (delta && acc.length < MAX_OUTPUT_CHARS) {
           acc += delta
           emit({ type: 'text', sessionId, delta })
         }
@@ -225,9 +230,12 @@ export async function send(
               (typeof input['command'] === 'string' && input['command']) ||
               (typeof input['pattern'] === 'string' && input['pattern']) ||
               ''
-            const tool: ToolCall = { name: String(block['name'] ?? ''), target: String(target) }
-            tools.push(tool)
-            emit({ type: 'tool', sessionId, tool })
+            const safeTarget = String(target).slice(0, 500)
+            if (tools.length < MAX_TOOLS) {
+              const tool: ToolCall = { name: String(block['name'] ?? ''), target: safeTarget }
+              tools.push(tool)
+              emit({ type: 'tool', sessionId, tool })
+            }
           }
         }
         continue

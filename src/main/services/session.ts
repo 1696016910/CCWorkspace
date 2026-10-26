@@ -55,9 +55,11 @@ export function listSessions(): SessionSummary[] {
     .prepare(
       `SELECT s.id, s.workspace_id, s.title, s.auto_title, s.created_at, s.updated_at, s.deleted_at,
               s.claude_session_id, s.context_tokens, s.context_max, s.context_percent,
-              (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count
+              COUNT(m.id) AS message_count
          FROM sessions s
+         LEFT JOIN messages m ON m.session_id = s.id
         WHERE s.deleted_at IS NULL
+        GROUP BY s.id
         ORDER BY s.updated_at DESC`
     )
     .all() as unknown as SessionRow[]
@@ -69,9 +71,11 @@ export function listDeletedSessions(): SessionSummary[] {
     .prepare(
       `SELECT s.id, s.workspace_id, s.title, s.auto_title, s.created_at, s.updated_at, s.deleted_at,
               s.claude_session_id, s.context_tokens, s.context_max, s.context_percent,
-              (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count
+              COUNT(m.id) AS message_count
          FROM sessions s
+         LEFT JOIN messages m ON m.session_id = s.id
         WHERE s.deleted_at IS NOT NULL
+        GROUP BY s.id
         ORDER BY s.deleted_at DESC`
     )
     .all() as unknown as SessionRow[]
@@ -253,6 +257,14 @@ export function appendMessage(
   const db = getDb()
   const now = new Date().toISOString()
   const id = randomUUID()
+
+  // 会话已被软删除时不再写入，避免「删除后仍产生新消息」
+  const target = db
+    .prepare('SELECT deleted_at FROM sessions WHERE id = ?')
+    .get(sessionId) as { deleted_at?: string | null } | undefined
+  if (!target || target.deleted_at) {
+    return { id, role, text: content, tools, timestamp: now }
+  }
 
   db.prepare(
     'INSERT INTO messages(id, session_id, role, content, tools, created_at) VALUES(?, ?, ?, ?, ?, ?)'

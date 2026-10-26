@@ -113,6 +113,8 @@ const api = {
 
   config: {
     readEnv: (): Promise<EnvEntry[]> => unwrap(ipcRenderer.invoke('config:readEnv')),
+    health: (): Promise<{ warning: string | null }> =>
+      unwrap(ipcRenderer.invoke('config:health')),
     saveEnv: (entries: EnvEntry[]): Promise<void> => unwrap(ipcRenderer.invoke('config:saveEnv', entries)),
     readPermissions: (): Promise<{ defaultMode: string; allow: string[]; deny: string[] }> =>
       unwrap(ipcRenderer.invoke('config:readPermissions')),
