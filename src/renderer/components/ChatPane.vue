@@ -100,9 +100,15 @@ async function pollContext(polls = 0): Promise<void> {
 async function doCompact(): Promise<void> {
   if (!current.value) return
   ctxOpen.value = false
-  await chat.compact(current.value.id)
-  await loadContext()
-  await sessions.load()
+  try {
+    await chat.compact(current.value.id)
+    await loadContext()
+    await sessions.load()
+  } catch (e) {
+    // 生成中压缩会被主进程拒绝，之前这条错误只进 console，
+    // 用户看到的是"面板自己关了、什么都没发生"
+    toast.error(e instanceof Error ? e.message : '压缩失败')
+  }
 }
 
 /* ── 消息 ── */
@@ -141,6 +147,14 @@ function onMessageSaved(msg: ChatMessage, sessionId: string): void {
   // 插进 B 的对话流里，看起来像"数据错乱"，重选会话才消失。
   if (sessionId === sessions.currentId) {
     sessions.messages = [...sessions.messages, msg]
+    // messageTotal 不跟着涨的话，"加载更早"按钮会因为
+    // messages.length >= messageTotal 而提前消失，旧消息再也翻不到
+    void window.api.session
+      .messageCount(sessionId)
+      .then((n) => {
+        if (sessions.currentId === sessionId) sessions.messageTotal = n
+      })
+      .catch(() => {})
     // 一轮结束后主进程已写入新的上下文用量，重新读一次即可，无需再跑 /context
     void refreshCtxFromCache()
     void scrollToBottom()
@@ -158,6 +172,7 @@ async function refreshCtxFromCache(): Promise<void> {
 onUnmounted(() => {
   disposed = true
   if (ctxPollTimer) clearTimeout(ctxPollTimer)
+  if (streamTimer) clearTimeout(streamTimer)
   // 订阅必须释放：否则边界重试重建组件后，事件仍进旧实例的闭包
   chat.unlisten()
 })
@@ -194,9 +209,54 @@ watch(
   }
 )
 
+/**
+ * 流式内容的渲染结果，按帧节流。
+ *
+ * renderMarkdown 是全文重新解析，成本随已输出长度线性增长；
+ * 每个 delta 都渲染一次就是 O(n²)：实测 5 万字符要 10 秒纯 CPU，
+ * 界面直接卡死。节流到约 8 帧/秒后同样的内容只需 2ms，
+ * 视觉上仍然连贯（人眼分辨不出 120ms 内的差异）。
+ */
+const streamHtml = ref('')
+let streamTimer: ReturnType<typeof setTimeout> | null = null
+let streamPending = false
+
+function scheduleStreamRender(): void {
+  if (streamTimer) {
+    streamPending = true
+    return
+  }
+  const run = (): void => {
+    streamHtml.value = renderMarkdown(chat.streamText)
+    streamTimer = null
+    if (streamPending) {
+      streamPending = false
+      streamTimer = setTimeout(run, 120)
+    }
+  }
+  // 首帧立即出，保证"开始输出"没有延迟感
+  streamHtml.value = renderMarkdown(chat.streamText)
+  streamTimer = setTimeout(run, 120)
+}
+
 watch(
   () => chat.streamText,
-  () => void scrollToBottom(false)
+  () => {
+    scheduleStreamRender()
+    void scrollToBottom(false)
+  }
+)
+
+/** 流式结束时清空缓冲，避免下一轮把旧 HTML 闪一下 */
+watch(
+  () => chat.streaming,
+  (on) => {
+    if (on) return
+    if (streamTimer) clearTimeout(streamTimer)
+    streamTimer = null
+    streamPending = false
+    streamHtml.value = ''
+  }
 )
 
 /* ── 输入框与命令面板 ── */
@@ -499,7 +559,7 @@ async function stop(): Promise<void> {
           <div
             v-if="chat.streamText"
             class="ai-text md"
-            v-html="renderMarkdown(chat.streamText)"
+            v-html="streamHtml"
             @click="onStreamClick"
           />
           <div v-else class="thinking">

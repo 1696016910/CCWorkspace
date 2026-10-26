@@ -237,7 +237,11 @@ function parseTools(raw: string | null): ChatMessage['tools'] {
 export function listMessages(sessionId: string, limit?: number): ChatMessage[] {
   const db = getDb()
 
-  if (!limit || limit <= 0) {
+  // 必须在校验后使用：负数会走 else 分支拼进 SQL 变成"取全部"，
+  // 小数/NaN 会让 SQLite 报 datatype mismatch 并把内部错误抛到界面
+  const n = typeof limit === 'number' && Number.isFinite(limit) ? Math.floor(limit) : 0
+
+  if (n <= 0) {
     const rows = db
       .prepare(
         'SELECT id, role, content, tools, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC'
@@ -252,7 +256,7 @@ export function listMessages(sessionId: string, limit?: number): ChatMessage[] {
       `SELECT id, role, content, tools, created_at FROM messages
         WHERE session_id = ? ORDER BY created_at DESC LIMIT ?`
     )
-    .all(sessionId, limit) as unknown as MessageRow[]
+    .all(sessionId, n) as unknown as MessageRow[]
   return rows.reverse().map(toChatMessage)
 }
 

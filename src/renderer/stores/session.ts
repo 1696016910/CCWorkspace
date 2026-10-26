@@ -94,15 +94,27 @@ export const useSessionStore = defineStore('session', () => {
 
     const token = ++selectToken
     loadingEarlier.value = true
+    // 记录"这次请求发起时界面已有多少条"，切片必须基于它。
+    // 用 await 之后的 messages.length 会错位：请求期间新消息到达、
+    // 或库比界面多（压缩摘要、失败轮次），都会导致重复或漏载一条。
+    const already = messages.value.length
     try {
       const all = await window.api.session.messages(id)
       // 请求期间用户可能已经切走，这时结果属于旧会话，不能往新会话里拼
       if (token !== selectToken || currentId.value !== id) return
-      // 一次取回全部再截取，数据量在本地可控；避免复杂游标
-      const already = messages.value.length
-      messages.value = all
-        .slice(Math.max(0, all.length - already - PAGE_SIZE), all.length - already)
-        .concat(messages.value)
+
+      // 库里现在可能比发起时更多（新消息已写入）。以"当前库总数"为基准，
+      // 取比已加载部分更早的那一段，避免用旧偏移量切错位置。
+      const extra = Math.max(0, all.length - messageTotal.value)
+      const loadedFromEnd = already + extra
+      const start = Math.max(0, all.length - loadedFromEnd - PAGE_SIZE)
+      const end = Math.max(0, all.length - loadedFromEnd)
+
+      const page = all.slice(start, end)
+      // 用 id 去重，防御任何残余的计数漂移
+      const seen = new Set(messages.value.map((m) => m.id))
+      messages.value = page.filter((m) => !seen.has(m.id)).concat(messages.value)
+      messageTotal.value = all.length
     } finally {
       loadingEarlier.value = false
     }

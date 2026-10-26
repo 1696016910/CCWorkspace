@@ -128,6 +128,13 @@ export const useChatStore = defineStore('chat', () => {
 
   /** 发送一条消息；返回是否成功发起（生成中的失败通过事件回传） */
   async function send(sessionId: string, text: string): Promise<boolean> {
+    // 记下发送前的状态：失败时必须恢复成"原样"，
+    // 而不是无脑清空——否则在 B 里发送失败会顺手把 A 正在跑的运行态抹掉，
+    // A 后续的流式内容和最终回复就全被当成过期事件丢弃了。
+    const prevStreaming = streaming.value
+    const prevSession = streamingSessionId.value
+    const prevRunId = activeRunId.value
+
     streaming.value = true
     error.value = null
     try {
@@ -137,9 +144,9 @@ export const useChatStore = defineStore('chat', () => {
       activeSessionId.value = sessionId
       return true
     } catch (e) {
-      streaming.value = false
-      streamingSessionId.value = null
-      activeRunId.value = 0
+      streaming.value = prevStreaming
+      streamingSessionId.value = prevSession
+      activeRunId.value = prevRunId
       error.value = e instanceof Error ? e.message : String(e)
       return false
     }

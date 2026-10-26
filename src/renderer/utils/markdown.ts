@@ -61,8 +61,21 @@ function decorateCodeBlocks(html: string): string {
  *
  * 模型输出属于不可信内容（可能夹带脚本），必须经 DOMPurify 净化。
  */
+/**
+ * 渲染结果缓存。
+ *
+ * 切会话时会把列表里的消息全部重渲染一次（实测 80 条约 200ms），
+ * 而消息内容一旦入库就不再变化。按原文做 key 缓存后，
+ * 来回切换几乎零成本。上限 300 条，避免长会话把内存吃满。
+ */
+const cache = new Map<string, string>()
+const CACHE_MAX = 300
+
 export function renderMarkdown(source: string | null | undefined): string {
   if (typeof source !== 'string' || source === '') return ''
+
+  const hit = cache.get(source)
+  if (hit !== undefined) return hit
 
   let raw: string
   try {
@@ -78,7 +91,7 @@ export function renderMarkdown(source: string | null | undefined): string {
 
   const decorated = decorateCodeBlocks(raw)
 
-  return purifier.sanitize(decorated, {
+  const result = purifier.sanitize(decorated, {
     ADD_ATTR: ['target', 'data-file', 'data-copy', 'type', 'class'],
     ADD_TAGS: ['button', 'span'],
     // map/area 必须禁：<area href> 是链接，但 closest('a') 抓不到它，
@@ -112,6 +125,14 @@ export function renderMarkdown(source: string | null | undefined): string {
       'usemap'
     ]
   })
+
+  // 简单的 FIFO 淘汰：Map 保持插入顺序，超限时删最早的一条
+  if (cache.size >= CACHE_MAX) {
+    const oldest = cache.keys().next().value
+    if (oldest !== undefined) cache.delete(oldest)
+  }
+  cache.set(source, result)
+  return result
 }
 
 /**

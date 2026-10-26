@@ -14,7 +14,7 @@ export type ChatEvent =
   | { type: 'start'; sessionId: string; runId: number }
   | { type: 'text'; sessionId: string; runId: number; delta: string }
   | { type: 'tool'; sessionId: string; runId: number; tool: ToolCall }
-  | { type: 'done'; sessionId: string; runId: number; message: ChatMessage; usage: Usage }
+  | { type: 'done'; sessionId: string; runId: number; message: ChatMessage; usage: Usage; interrupted?: boolean }
   | { type: 'error'; sessionId: string; runId: number; message: string }
   | { type: 'interrupted'; sessionId: string; runId: number }
   | { type: 'compacted'; sessionId: string; runId: number }
@@ -143,9 +143,13 @@ export async function send(
   // 必须在这里同步占位：后面有 import/读配置等多个 await，
   // 中间空档里第二次 chat:send 会再次通过校验，起两个 run。
   const runId = ++runSeq
+  /** 占位阶段就被用户点了停止（此时还没有真实 query 可中断） */
+  let abortRequested = false
   const placeholder: ActiveRun = {
     id: runId,
-    abort: () => {},
+    abort: () => {
+      abortRequested = true
+    },
     release: () => {
       if (active?.id === runId) active = null
     }
@@ -201,7 +205,9 @@ export async function send(
       }
     })
 
-    const runId = ++runSeq
+    // 复用外层已分配的 runId：在这里再 ++ 一次会让 start/done 用一个 id、
+    // text/tool 用另一个 id，渲染层会把所有增量当成过期事件丢弃，
+    // 表现为整轮只显示"正在思考"，结束后才整段冒出内容。
     const thisRun: ActiveRun = {
       id: runId,
       abort: () => {
@@ -213,8 +219,15 @@ export async function send(
         if (active?.id === runId) active = null
       }
     }
+    // 占位换成带真实 abort 的实现，但 id 保持不变
     run = thisRun
-    active = thisRun
+    if (abortRequested || active?.id !== runId) {
+      // 建 query 期间用户已经点了停止：立刻中止，别让它白跑白计费
+      aborted = true
+      void q.interrupt().catch(() => {})
+    } else {
+      active = thisRun
+    }
 
     const iterator = q[Symbol.asyncIterator]()
 
@@ -252,6 +265,13 @@ export async function send(
       }
 
       if (message.type === 'stream_event') {
+        // parent_tool_use_id 非空说明这段来自 Task 子代理。
+        // 不区分的话，子代理的中间输出会拼进主回复、还实时显示给用户，
+        // 保存下来的助手消息也会变成"子代理文本 + 主模型回答"的混合物。
+        const fromSubagent =
+          (message as unknown as { parent_tool_use_id?: string | null }).parent_tool_use_id != null
+        if (fromSubagent) continue
+
         const delta = deltaText((message as unknown as { event: unknown }).event)
         if (delta && acc.length < MAX_OUTPUT_CHARS) {
           acc += delta
@@ -280,6 +300,11 @@ export async function send(
             categories: c.categories ?? []
           })
           setContextUsage(sessionId, c.total_tokens ?? 0, c.raw_max_tokens ?? 0, c.percentage ?? 0)
+        }
+
+        // 子代理的完整消息同样不能算进主回复
+        if ((message as unknown as { parent_tool_use_id?: string | null }).parent_tool_use_id != null) {
+          continue
         }
 
         const blocks = (
@@ -395,12 +420,15 @@ export async function send(
           costUsd: r.total_cost_usd ?? 0,
           percentage: pct
         }
+        // 保留已有的分类明细：清空会让刷新判定（要求 categories 非空）
+        // 永远失败，于是每轮对话后第一次打开面板都会重跑一次 /context，
+        // 白烧 token。token 数本身每轮都更新，分类明细沿用即可。
         ctxSnapshots.set(sessionId, {
           model: windowModel || model || '',
           total_tokens: used,
           raw_max_tokens: maxTokens,
           percentage: pct,
-          categories: []
+          categories: ctxSnapshots.get(sessionId)?.categories ?? []
         })
         setContextUsage(sessionId, used, maxTokens, pct)
       }
@@ -461,8 +489,10 @@ export async function send(
     return
   }
 
-  if (aborted) emit({ type: 'interrupted', sessionId, runId })
-  emit({ type: 'done', sessionId, runId, message: saved, usage })
+  // 中断时不要再单独发 interrupted：渲染层收到它就会把 runId 清零，
+  // 紧跟其后的 done 反而被当成过期事件丢弃，结果是"库里有消息、界面没有"。
+  // 一个 done 带上 interrupted 标记就够了。
+  emit({ type: 'done', sessionId, runId, message: saved, usage, interrupted: aborted })
 }
 
 /**
@@ -501,18 +531,25 @@ export async function listCommands(_sessionId?: string): Promise<SlashCommandInf
  * UI 打开上下文面板时用它取数据：不经过聊天流，
  * 因此不会把界面置为「生成中」，也不产生用户可见的消息。
  */
+/** 正在跑 /context 的会话，避免轮询把同一个会话的 CLI 反复拉起 */
+const refreshing = new Set<string>()
+
 export async function refreshContext(
   sessionId: string,
   cwd: string,
   skills: string[]
 ): Promise<ContextUsageDetail | null> {
+  // 有回复在跑时不打扰：另起一个 CLI resume 同一会话会互相污染 transcript
   if (active) return getContextUsage(sessionId)
+  // 已经在刷新了就直接返回现有数据，让轮询自然停下
+  if (refreshing.has(sessionId)) return getContextUsage(sessionId)
 
   const existing = ctxSnapshots.get(sessionId)
   if (existing && existing.categories && existing.categories.length > 0) {
     return getContextUsage(sessionId)
   }
 
+  refreshing.add(sessionId)
   try {
     const { query } = await import('@anthropic-ai/claude-agent-sdk')
     const raw = await readRaw()
@@ -583,6 +620,8 @@ export async function refreshContext(
     }
   } catch (e) {
     console.error('[context] refresh 失败:', e)
+  } finally {
+    refreshing.delete(sessionId)
   }
 
   return getContextUsage(sessionId)
@@ -658,6 +697,11 @@ ${summary.trim()}`)
   } finally {
     placeholder.release()
   }
+
+  // 压缩后旧快照必然失效：不清掉的话面板还显示压缩前的百分比和分类，
+  // 用户会以为没生效并反复点压缩
+  ctxSnapshots.delete(sessionId)
+  setContextUsage(sessionId, 0, 0, 0)
 
   emit({ type: 'compacted', sessionId, runId })
 }

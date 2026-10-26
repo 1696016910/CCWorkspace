@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSessionStore } from '@/stores/session'
 
@@ -8,6 +9,34 @@ const sessions = useSessionStore()
 /** 用于在移除确认里告知会连带删除多少会话 */
 function sessionCountOf(workspaceId: string): number {
   return sessions.list.filter((s) => s.workspaceId === workspaceId).length
+}
+
+/**
+ * 回收站里的会话也会被级联删除。
+ * 它的数量不在 sessions.list 里，必须单独查，否则确认框会少报，
+ * 用户以为回收站还能恢复，实际已经一起没了。
+ */
+const deletedByWorkspace = ref<Record<string, number>>({})
+
+async function loadDeletedCounts(): Promise<void> {
+  try {
+    const deleted = await window.api.session.listDeleted()
+    const map: Record<string, number> = {}
+    for (const s of deleted) map[s.workspaceId] = (map[s.workspaceId] ?? 0) + 1
+    deletedByWorkspace.value = map
+  } catch {
+    // 回收站读取失败不阻断主流程
+  }
+}
+
+onMounted(loadDeletedCounts)
+
+/** 移除时把回收站里的会话数一起算进警告 */
+async function removeWithDeleted(id: string): Promise<void> {
+  const active = sessionCountOf(id)
+  const trashed = deletedByWorkspace.value[id] ?? 0
+  await ws.remove(id, active, trashed)
+  await loadDeletedCounts()
 }
 </script>
 
@@ -42,7 +71,12 @@ function sessionCountOf(workspaceId: string): number {
           <div class="st-r">
             <span v-if="ws.defaultId === w.id" class="st-tag-default">默认</span>
             <button v-else class="st-btn" @click="ws.setDefault(w.id)">设为默认</button>
-            <button class="st-btn dgr" @click="ws.remove(w.id, sessionCountOf(w.id))">移除</button>
+            <button
+              class="st-btn dgr"
+              @click="removeWithDeleted(w.id)"
+            >
+              移除
+            </button>
           </div>
         </div>
         <div v-if="ws.list.length === 0" class="st-empty-row">还没有工作区</div>
