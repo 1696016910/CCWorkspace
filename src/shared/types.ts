@@ -121,3 +121,25 @@ export interface MarketplaceInfo {
 
 /** IPC 统一返回结构 */
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string }
+
+/** 自动更新状态机 */
+export type UpdateState =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+
+export interface UpdateStatus {
+  state: UpdateState
+  currentVersion: string
+  /** 新版本号，仅 available / downloaded 有值 */
+  version?: string
+  /** 下载进度 0-100 */
+  percent?: number
+  /** 失败原因或"已是最新"等提示 */
+  message?: string
+  /** 实际请求的更新地址，含代理前缀，便于排查 */
+  feed: string
+}

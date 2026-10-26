@@ -47,6 +47,81 @@ npm run dist:linux  # Linux
 
 产物在 `release/` 下。
 
+产物统一命名为 `ClaudeWorkbench-<版本>-<架构>.<扩展名>`。必须是 ASCII：
+中文名会被百分号编码进 `latest.yml` 的下载地址，多数更新代理会直接返回 400。
+
+---
+
+## 发版与自动更新
+
+### 发一个新版本
+
+```bash
+npm version patch        # 0.1.0 → 0.1.1，自动 commit 并打 tag
+git push --follow-tags   # 推送 tag 触发 GitHub Actions
+```
+
+Actions 会在 Windows / Linux / macOS 三个 runner 上分别构建，产物与
+`latest.yml` 汇总到同一个 GitHub Release。约 45 分钟完成。
+
+### 更新怎么工作
+
+应用启动 5 秒后静默检查一次，之后可在「设置 → 更新」手动触发。
+下载与安装分开：发现新版本由你决定何时下载，下载完成后重启生效。
+
+更新源是 GitHub 的**固定地址**，不随版本号变化：
+
+```
+https://github.com/<owner>/<repo>/releases/latest/download/
+```
+
+`electron-updater` 从这个目录取 `latest.yml`，再按其中的相对文件名下载安装包。
+
+| 平台 | 产物 | 自动更新 |
+|---|---|---|
+| Windows | `.exe` | ✅ 可用（未签名只影响首次安装的 SmartScreen，不影响更新） |
+| Linux | `.AppImage` | ✅ 可用 |
+| macOS | `.dmg` + `.zip` | ⚠️ 需 Apple 开发者签名，未签名时只能手动下载 |
+
+macOS 的 Squirrel 只接受已签名的包，这是系统限制，无法绕过。
+未签名时应用会把错误降级为一句提示并给出「打开发布页」按钮，不会崩溃。
+
+### 网络不通时用代理
+
+「设置 → 更新 → 代理前缀」填一个地址即可，留空表示直连。拼接规则：
+
+```
+留空   → https://github.com/<owner>/<repo>/releases/latest/download/latest.yml
+填前缀 → <前缀>/https://github.com/<owner>/<repo>/releases/latest/download/latest.yml
+```
+
+`latest.yml` 里的文件名是相对路径，下载时会继承同一个前缀，所以填一次就覆盖全部请求。
+
+**自建一个最简单的代理**（Cloudflare Workers，免费额度足够）：
+
+```js
+export default {
+  async fetch(req) {
+    // 请求形如 https://<worker>/https://github.com/o/r/releases/...
+    // 去掉开头的斜杠后，剩下的本身就是完整目标地址，不能再拼一次域名
+    const target = new URL(req.url).pathname.slice(1) + new URL(req.url).search
+    const res = await fetch(target, {
+      redirect: 'follow' // latest/download 会 302 跳到真实资源，必须跟随
+    })
+    const headers = new Headers(res.headers)
+    // 去掉编码相关头，避免中转后内容长度与实际不符
+    headers.delete('content-encoding')
+    headers.delete('content-length')
+    return new Response(res.body, { status: res.status, headers })
+  }
+}
+```
+
+> 注意 `slice(1)`：如果把 `pathname` 直接拼到 `https://github.com` 后面，
+> 会得到 `https://github.com/https://github.com/...`，代理必然 404。
+
+部署后把 `https://<你的子域>.workers.dev` 填进代理前缀即可。
+
 ---
 
 ## 首次启动

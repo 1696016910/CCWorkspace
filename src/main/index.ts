@@ -35,6 +35,16 @@ import {
   savePermissions,
   testConnection
 } from './services/claudeSettings'
+import {
+  checkForUpdate,
+  checkOnStartup,
+  downloadUpdate,
+  getFeedPrefix,
+  getUpdateStatus,
+  installUpdate,
+  openReleases,
+  setFeedPrefix
+} from './services/update'
 import { listSkills, slashCandidates, toggleSkill } from './services/skills'
 import {
   addMarketplace,
@@ -424,6 +434,16 @@ function registerIpc(): void {
     await removeMarketplace(name)
     return listMarketplaces()
   })
+
+  /* 更新 */
+  handle('app:version', () => app.getVersion())
+  handle('update:status', () => getUpdateStatus())
+  handle('update:check', () => checkForUpdate())
+  handle('update:download', () => downloadUpdate())
+  handle('update:install', () => installUpdate())
+  handle('update:getFeed', () => getFeedPrefix())
+  handle('update:setFeed', (prefix: string) => setFeedPrefix(prefix))
+  handle('update:openReleases', () => openReleases())
 }
 
 /**
@@ -496,6 +516,7 @@ app.whenReady().then(() => {
   installMenu()
   registerIpc()
   createWindow()
+  checkOnStartup()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

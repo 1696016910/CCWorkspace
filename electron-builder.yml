@@ -8,11 +8,13 @@ files:
   - package.json
 asarUnpack:
   - node_modules/@anthropic-ai/claude-agent-sdk-*/**/*
+# 产物名必须保持 ASCII：中文名会被百分号编码进 latest.yml 的下载地址，
+# 多数更新代理会直接返回 400。产品名（安装后显示）仍是中文。
+artifactName: ClaudeWorkbench-${version}-${arch}.${ext}
 win:
   target:
     - target: nsis
       arch: [x64]
-  artifactName: ${productName}-${version}-${arch}.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
@@ -20,8 +22,12 @@ nsis:
   # 卸载时询问是否一并删除用户数据
   deleteAppDataOnUninstall: false
 mac:
-  target: [dmg]
+  # zip 是 Squirrel.Mac 自更新的必要产物，dmg 不能用于自动更新
+  target: [dmg, zip]
   category: public.app-category.developer-tools
 linux:
   target: [AppImage]
   category: Development
+publish:
+  provider: github
+  releaseType: release

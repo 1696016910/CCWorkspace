@@ -8,6 +8,7 @@ import type {
   SessionSummary,
   SkillInfo,
   SlashCommandInfo,
+  UpdateStatus,
   Workspace
 } from '../shared/types'
 
@@ -147,6 +148,25 @@ const api = {
       unwrap(ipcRenderer.invoke('marketplace:add', name, source)),
     remove: (name: string): Promise<MarketplaceInfo[]> =>
       unwrap(ipcRenderer.invoke('marketplace:remove', name))
+  },
+
+  update: {
+    version: (): Promise<string> => unwrap(ipcRenderer.invoke('app:version')),
+    status: (): Promise<UpdateStatus> => unwrap(ipcRenderer.invoke('update:status')),
+    check: (): Promise<UpdateStatus> => unwrap(ipcRenderer.invoke('update:check')),
+    download: (): Promise<UpdateStatus> => unwrap(ipcRenderer.invoke('update:download')),
+    install: (): Promise<void> => unwrap(ipcRenderer.invoke('update:install')),
+    getFeed: (): Promise<string> => unwrap(ipcRenderer.invoke('update:getFeed')),
+    setFeed: (prefix: string): Promise<void> =>
+      unwrap(ipcRenderer.invoke('update:setFeed', prefix)),
+    openReleases: (): Promise<void> => unwrap(ipcRenderer.invoke('update:openReleases')),
+    /** 订阅进度事件，返回取消订阅函数 */
+    onEvent: (handler: (event: UpdateStatus) => void): (() => void) => {
+      const listener = (_e: unknown, payload: unknown): void =>
+        handler(payload as UpdateStatus)
+      ipcRenderer.on('update:event', listener)
+      return () => ipcRenderer.removeListener('update:event', listener)
+    }
   }
 }
 

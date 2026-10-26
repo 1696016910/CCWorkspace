@@ -7,6 +7,7 @@ import ModelsSection from './settings/ModelsSection.vue'
 import SkillsSection from './settings/SkillsSection.vue'
 import PluginsSection from './settings/PluginsSection.vue'
 import MarketplacesSection from './settings/MarketplacesSection.vue'
+import UpdateSection from './settings/UpdateSection.vue'
 
 const emit = defineEmits<{ close: [] }>()
 
@@ -17,7 +18,8 @@ const TABS = [
   { id: 'model', label: '模型', group: '配置' },
   { id: 'skills', label: 'Skill', group: '扩展' },
   { id: 'plugins', label: '插件', group: '扩展' },
-  { id: 'market', label: '插件仓库', group: '扩展' }
+  { id: 'market', label: '插件仓库', group: '扩展' },
+  { id: 'update', label: '更新', group: '关于' }
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -35,7 +37,8 @@ onUnmounted(() => window.removeEventListener('keydown', onEsc))
 const groups = [
   { name: '工作', ids: ['ws'] as TabId[] },
   { name: '配置', ids: ['env', 'perm', 'model'] as TabId[] },
-  { name: '扩展', ids: ['skills', 'plugins', 'market'] as TabId[] }
+  { name: '扩展', ids: ['skills', 'plugins', 'market'] as TabId[] },
+  { name: '关于', ids: ['update'] as TabId[] }
 ]
 
 function labelOf(id: TabId): string {
@@ -78,6 +81,7 @@ function labelOf(id: TabId): string {
           <SkillsSection v-else-if="active === 'skills'" />
           <PluginsSection v-else-if="active === 'plugins'" />
           <MarketplacesSection v-else-if="active === 'market'" />
+          <UpdateSection v-else-if="active === 'update'" />
         </div>
       </main>
     </div>
