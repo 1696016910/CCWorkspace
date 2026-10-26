@@ -127,7 +127,8 @@ function openFile(path: string): void {
   transition: opacity 0.12s, background 0.12s;
 }
 
-.msg-user:hover .user-copy {
+.msg-user:hover .user-copy,
+.msg-user:focus-within .user-copy {
   opacity: 1;
 }
 
@@ -144,7 +145,8 @@ function openFile(path: string): void {
   transition: opacity 0.14s;
 }
 
-.msg-ai:hover .msg-actions {
+.msg-ai:hover .msg-actions,
+.msg-ai:focus-within .msg-actions {
   opacity: 1;
 }
 
@@ -466,6 +468,11 @@ function openFile(path: string): void {
   gap: 6px;
   height: 26px;
   padding: 0 10px;
+  /* 超长路径会把整个消息列撑出横向滚动条 */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border-radius: 6px;
   border: 1px solid var(--line-2);
   background: var(--surface);

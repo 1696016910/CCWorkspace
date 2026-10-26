@@ -169,7 +169,14 @@ function relativeTime(iso: string): string {
       </div>
 
       <div v-for="g in groups" :key="g.workspaceId" class="ws">
-        <div class="ws-head" @click="ws.toggle(g.workspaceId)">
+        <div
+          class="ws-head"
+          role="button"
+          tabindex="0"
+          @click="ws.toggle(g.workspaceId)"
+          @keydown.enter.prevent="ws.toggle(g.workspaceId)"
+          @keydown.space.prevent="ws.toggle(g.workspaceId)"
+        >
           <span class="tri" :class="{ closed: ws.isCollapsed(g.workspaceId) }">▼</span>
           <span class="fico">
             <svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z" /></svg>
@@ -215,7 +222,11 @@ function relativeTime(iso: string): string {
             :key="s.id"
             class="chat"
             :class="{ on: sessions.currentId === s.id }"
+            role="button"
+            tabindex="0"
             @click="sessions.select(s.id)"
+            @keydown.enter.prevent="sessions.select(s.id)"
+            @keydown.space.prevent="sessions.select(s.id)"
             @contextmenu="startRename($event, s.id, s.title)"
           >
             <input
@@ -640,7 +651,7 @@ function relativeTime(iso: string): string {
   border-radius: var(--r);
   background: var(--danger-bg);
   border: 1px solid var(--danger-line);
-  color: #8a4b47;
+  color: var(--danger-t);
   font-size: 11.5px;
   line-height: 1.6;
 }

@@ -231,7 +231,7 @@ onMounted(load)
 .test-result.bad {
   background: var(--danger-bg);
   border-color: #f2dedd;
-  color: #8a4b47;
+  color: var(--danger-t);
 }
 
 .test-result .ms {

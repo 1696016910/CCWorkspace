@@ -9,6 +9,12 @@ on:
 permissions:
   contents: write
 
+# 同一个 tag 只允许一条流水线在跑：并发触发会抢同一个 Release，
+# 同名产物走"删了再传"，latest*.yml 可能来自不同一次运行
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # 先建好 Release 再构建。
   # electron-builder 的 createRelease() 遇到并发创建会收到 422 且不重试，
@@ -28,8 +34,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${{ steps.tag.outputs.tag }}"
+          # --verify-tag：tag 不存在时报错，而不是在默认分支 HEAD 上凭空建 tag
           gh release view "$tag" >/dev/null 2>&1 ||
-            gh release create "$tag" --title "$tag" --notes "自动化构建产物"
+            gh release create "$tag" --verify-tag --title "$tag" --notes "自动化构建产物"
 
   build:
     needs: prepare
@@ -56,6 +63,11 @@ jobs:
           cache: npm
 
       # node:sqlite 需要 Node 22+，Electron 45 内置版本已满足
+      #
+      # lockfile 里的 resolved 指向国内镜像，GitHub runner 跨境访问它
+      # 一旦限流/抖动就是三平台同时失败。这里让 npm 用官方源重解析。
+      - run: npm config set registry https://registry.npmjs.org
+
       - run: npm ci
 
       - run: npm run typecheck
@@ -69,5 +81,27 @@ jobs:
         run: npx electron-builder ${{ matrix.args }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS 未签名时禁止 electron-builder 尝试寻找证书而中断
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+          # Release 创建超过 2 小时后 electron-builder 会静默跳过上传且不报错，
+          # 三平台全绿但产物没上传。这个开关让它照常覆盖。
+          EP_GH_IGNORE_TIME: 'true'
+
+      # 唯一的自动防线：确认产物真的传上去了。
+      # 否则"CI 绿了但客户端收不到更新"这种静默失败没人发现。
+      - name: Assert assets uploaded
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          names=$(gh release view "$tag" --json assets -q '.assets[].name')
+          echo "$names"
+          if [[ "${{ matrix.args }}" == "--win" ]]; then
+            echo "$names" | grep -q "latest.yml" || { echo "缺少 latest.yml"; exit 1; }
+            echo "$names" | grep -q -- "-x64.exe" || { echo "缺少 Windows 安装包"; exit 1; }
+          elif [[ "${{ matrix.args }}" == "--linux" ]]; then
+            echo "$names" | grep -q "latest-linux.yml" || { echo "缺少 latest-linux.yml"; exit 1; }
+            echo "$names" | grep -q -- ".AppImage" || { echo "缺少 AppImage"; exit 1; }
+          else
+            echo "$names" | grep -q "latest-mac.yml" || { echo "缺少 latest-mac.yml"; exit 1; }
+            echo "$names" | grep -q -- ".zip" || { echo "缺少 macOS zip"; exit 1; }
+          fi

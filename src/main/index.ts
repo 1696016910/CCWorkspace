@@ -371,7 +371,8 @@ function registerIpc(): void {
     const binaryExts = new Set([
       '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp',
       '.pdf', '.zip', '.gz', '.7z', '.rar', '.exe', '.dll', '.so',
-      '.woff', '.woff2', '.ttf', '.mp3', '.mp4', '.mov'
+      '.woff', '.woff2', '.ttf', '.mp3', '.mp4', '.mov',
+      '.dylib', '.node', '.dmg', '.app', '.pkg', '.deb', '.AppImage'
     ])
     if (binaryExts.has(ext)) {
       throw new Error('这是二进制文件，无法以文本方式预览')
@@ -625,7 +626,11 @@ if (!gotLock) {
  * 完全不设菜单会导致输入框里无法复制粘贴。
  */
 function installMenu(): void {
+  const isMac = process.platform === 'darwin'
   const template: Electron.MenuItemConstructorOptions[] = [
+    // macOS 必须有应用菜单：第一个子菜单的 label 会被系统替换成应用名，
+    // 缺了它就没有 Cmd+Q / About / Hide，用户关窗后会觉得"退不掉"
+    ...(isMac ? ([{ role: 'appMenu' }] as Electron.MenuItemConstructorOptions[]) : []),
     {
       label: '编辑',
       submenu: [
@@ -651,7 +656,9 @@ function installMenu(): void {
         { role: 'zoomIn', label: '放大' },
         { role: 'zoomOut', label: '缩小' }
       ]
-    }
+    },
+    // 窗口菜单提供最小化/关闭/前置全部窗口，macOS 上属于标准菜单项
+    ...(isMac ? ([{ role: 'windowMenu' }] as Electron.MenuItemConstructorOptions[]) : [])
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }

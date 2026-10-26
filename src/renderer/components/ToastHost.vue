@@ -5,7 +5,8 @@ const { items } = useToast()
 </script>
 
 <template>
-  <div class="toasts">
+  <!-- aria-live：读屏用户否则完全收不到"已保存/失败"这类反馈 -->
+  <div class="toasts" role="status" aria-live="polite">
     <div v-for="t in items" :key="t.id" class="toast" :class="t.kind">
       <span class="ico">{{ t.kind === 'success' ? '✓' : t.kind === 'error' ? '!' : '·' }}</span>
       <span class="text">{{ t.text }}</span>
@@ -17,7 +18,9 @@ const { items } = useToast()
 .toasts {
   position: fixed;
   left: 50%;
-  bottom: 28px;
+  /* 28px 会正压在输入框和发送按钮上，抬到 composer 之上 */
+  bottom: 150px;
+  max-width: min(420px, calc(100vw - 40px));
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;

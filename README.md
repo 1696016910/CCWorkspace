@@ -86,6 +86,17 @@ https://github.com/<owner>/<repo>/releases/latest/download/
 macOS 的 Squirrel 只接受已签名的包，这是系统限制，无法绕过。
 未签名时应用会把错误降级为一句提示并给出「打开发布页」按钮，不会崩溃。
 
+### 首次安装被系统拦截怎么办
+
+| 平台 | 现象 | 处理 |
+|---|---|---|
+| Windows | SmartScreen 提示"未知发布者" | 点「更多信息」→「仍要运行」 |
+| macOS | 提示"已损坏"或"无法验证开发者" | 右键点应用 →「打开」，或终端执行 `xattr -dr com.apple.quarantine /Applications/Claude\ 工作台.app` |
+| Linux | AppImage 报 `libfuse.so.2` 缺失 | 装 `libfuse2`，或改用 `.deb` 包 |
+
+产物用 ad-hoc 签名（`identity: '-'`），能让 macOS 接受运行，但不满足
+Squirrel 的自动更新要求——所以 mac 端更新仍需手动下载。
+
 ### 网络不通时用代理
 
 「设置 → 更新 → 代理前缀」填一个地址即可，留空表示直连。拼接规则：

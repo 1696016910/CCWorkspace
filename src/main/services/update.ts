@@ -150,7 +150,16 @@ export async function checkForUpdate(): Promise<UpdateStatus> {
   autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl() })
   push({ state: 'checking', message: undefined })
   try {
-    await autoUpdater.checkForUpdates()
+    // updater 未激活时（例如 Linux 上不是以 AppImage 方式运行）
+    // checkForUpdates 直接返回 null，既不报错也不发"已是最新"，
+    // 界面会永远停在"正在检查…"。这里补一个明确结果。
+    const result = await autoUpdater.checkForUpdates()
+    if (result === null) {
+      push({
+        state: 'idle',
+        message: '当前运行方式不支持自动更新，请到发布页手动下载'
+      })
+    }
   } catch (e) {
     push({ state: 'error', message: friendlyError(messageOf(e)) })
   }

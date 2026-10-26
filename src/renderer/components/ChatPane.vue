@@ -516,8 +516,8 @@ async function stop(): Promise<void> {
 <template>
   <main class="main">
     <div class="main-head">
-      <span class="mh-title">{{ current?.title ?? '未选择会话' }}</span>
-      <span v-if="current" class="mh-ws">
+      <span class="mh-title" :title="current?.title ?? ''">{{ current?.title ?? '未选择会话' }}</span>
+      <span v-if="current" class="mh-ws" :title="workspaceName">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
           <path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z" />
         </svg>
@@ -534,6 +534,12 @@ async function stop(): Promise<void> {
 
     <div v-if="current" ref="thread" class="thread">
       <div class="thread-inner">
+        <!-- 新会话没有任何消息时，中间就是一片纯白，用户不知道能做什么 -->
+        <div v-if="!sessions.messages.length && !chat.streaming" class="thread-empty">
+          <div class="te-ico">✦</div>
+          <div class="te-title">开始对话</div>
+          <div class="te-hint">直接输入问题，或用 <code>/</code> 调用命令与 Skill</div>
+        </div>
         <div v-if="sessions.messages.length < sessions.messageTotal" class="load-earlier">
           <button :disabled="sessions.loadingEarlier" @click="loadEarlier">
             {{ sessions.loadingEarlier ? '加载中…' : `加载更早的消息 · 还有 ${sessions.messageTotal - sessions.messages.length} 条` }}
@@ -702,13 +708,60 @@ async function stop(): Promise<void> {
   flex: 0 1 auto;
 }
 
+.thread-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 80px 24px;
+  color: var(--t3);
+  text-align: center;
+}
+
+.thread-empty .te-ico {
+  font-size: 22px;
+  color: var(--green);
+  opacity: 0.7;
+}
+
+.thread-empty .te-title {
+  font-size: 14px;
+  color: var(--t2);
+}
+
+.thread-empty .te-hint {
+  font-size: 12px;
+  color: var(--t4);
+}
+
+.thread-empty .te-hint code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-soft);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
 .mh-ws {
   font-size: 11.5px;
   color: var(--t4);
   display: flex;
   align-items: center;
   gap: 5px;
-  flex: none;
+  /* 必须可收缩 + 省略：flex:none 时长工作区名会把后面的
+     复制/删除按钮挤出视口，用户看不到也点不到 */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.mh-ws > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .sp {
@@ -881,7 +934,10 @@ async function stop(): Promise<void> {
   }
 }
 
-/* 流式输出也用 Markdown 排版 */
+/* 流式输出必须与历史消息用同一套 Markdown 排版。
+   之前只定义了 p/ul/code/pre，标题会按浏览器默认 27px 渲染、
+   链接是蓝色下划线、代码块没有边框和复制按钮样式，
+   消息落库的瞬间整块会跳变一次。 */
 .ai-text.md :deep(p) {
   margin: 0 0 12px;
 }
@@ -890,10 +946,28 @@ async function stop(): Promise<void> {
   margin-bottom: 0;
 }
 
+.ai-text.md :deep(h1),
+.ai-text.md :deep(h2),
+.ai-text.md :deep(h3),
+.ai-text.md :deep(h4) {
+  margin: 18px 0 8px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ai-text.md :deep(h1) { font-size: 18px; }
+.ai-text.md :deep(h2) { font-size: 16px; }
+.ai-text.md :deep(h3) { font-size: 14.5px; }
+.ai-text.md :deep(h4) { font-size: 13.5px; }
+
 .ai-text.md :deep(ul),
 .ai-text.md :deep(ol) {
   margin: 0 0 12px;
   padding-left: 22px;
+}
+
+.ai-text.md :deep(li) {
+  margin-bottom: 4px;
 }
 
 .ai-text.md :deep(code) {
@@ -918,6 +992,86 @@ async function stop(): Promise<void> {
   background: none;
   border: none;
   padding: 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.ai-text.md :deep(a) {
+  color: var(--green-t);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.ai-text.md :deep(blockquote) {
+  border-left: 3px solid var(--line-3);
+  padding: 2px 0 2px 14px;
+  margin: 0 0 12px;
+  color: var(--t2);
+}
+
+.ai-text.md :deep(table) {
+  border-collapse: collapse;
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  width: 100%;
+}
+
+.ai-text.md :deep(th),
+.ai-text.md :deep(td) {
+  border: 1px solid var(--line-2);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.ai-text.md :deep(th) {
+  background: var(--bg-soft);
+  font-weight: 500;
+}
+
+/* 代码块的头部（语言标签 + 复制按钮）也要有样式，
+   否则流式时那两个元素是裸按钮 */
+.ai-text.md :deep(.code-block) {
+  margin: 0 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ai-text.md :deep(.code-head) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  height: 28px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--t4);
+}
+
+.ai-text.md :deep(.code-lang) {
+  font-family: var(--mono);
+}
+
+.ai-text.md :deep(.code-copy) {
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 4px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  font-size: 11px;
+  color: var(--t2);
+  cursor: pointer;
+}
+
+.ai-text.md :deep(.code-copy:hover) {
+  background: var(--bg-hover);
+}
+
+.ai-text.md :deep(.code-block pre) {
+  margin: 0;
+  border: none;
+  border-radius: 0;
 }
 
 .chat-error {
@@ -926,7 +1080,7 @@ async function stop(): Promise<void> {
   border-radius: 8px;
   background: var(--danger-bg);
   border: 1px solid var(--danger-line);
-  color: #8a4b47;
+  color: var(--danger-t);
   font-size: 12.5px;
   line-height: 1.6;
 }

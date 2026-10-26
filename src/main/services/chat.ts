@@ -2,7 +2,14 @@ import { BrowserWindow } from 'electron'
 import type { ChatMessage, ContextUsageDetail, SlashCommandInfo, ToolCall } from '../../shared/types'
 import { appendMessage, getClaudeSessionId, setClaudeSessionId, setContextUsage } from './session'
 import { readModels, readPermissions, readRaw } from './claudeSettings'
-import { resolveClaudeBinary } from './binary'
+import { describeBinaryMissing, resolveClaudeBinary } from './binary'
+
+/** 取内置 claude 路径；缺失时抛出能指导排查的错误，而不是让 SDK 报 spawn ENOENT */
+function claudeBinary(): string {
+  const p = resolveClaudeBinary()
+  if (!p) throw new Error(describeBinaryMissing())
+  return p
+}
 
 /**
  * runId 标识"哪一轮"。
@@ -200,7 +207,7 @@ export async function send(
         model,
         permissionMode: mode,
         includePartialMessages: true,
-        pathToClaudeCodeExecutable: resolveClaudeBinary(),
+        pathToClaudeCodeExecutable: claudeBinary(),
         skills: skillsOption(skills)
       }
     })
@@ -564,7 +571,7 @@ export async function refreshContext(
         env: { ...process.env, ...envOverrides } as Record<string, string>,
         model: models['ANTHROPIC_MODEL'] || undefined,
         permissionMode: 'plan',
-        pathToClaudeCodeExecutable: resolveClaudeBinary(),
+        pathToClaudeCodeExecutable: claudeBinary(),
         skills: skillsOption(skills)
       }
     })
@@ -663,7 +670,7 @@ export async function compact(sessionId: string, cwd: string, skills: string[]):
         env: { ...process.env, ...envOverrides } as Record<string, string>,
         model: models['ANTHROPIC_MODEL'] || undefined,
         permissionMode: 'acceptEdits',
-        pathToClaudeCodeExecutable: resolveClaudeBinary(),
+        pathToClaudeCodeExecutable: claudeBinary(),
         skills: skillsOption(skills)
       }
     })

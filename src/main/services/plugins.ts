@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { MarketplaceInfo, PluginInfo } from '../../shared/types'
 import { readRaw, writeSettings } from './claudeSettings'
+import { resolveClaudeBinary } from './binary'
 
 const run = promisify(execFile)
 
@@ -17,7 +18,12 @@ interface CliPlugin {
  * 这里显式走 cmd.exe 调用，并把参数逐层转义，避免命令注入。
  */
 function cliCommand(args: string[]): { file: string; argv: string[] } {
-  if (process.platform !== 'win32') return { file: 'claude', argv: args }
+  if (process.platform !== 'win32') {
+    // 从 Finder / 桌面图标启动的 GUI 进程拿不到登录 shell 的 PATH，
+    // 通常找不到 Homebrew / npm 装的 claude。优先用应用内置的那份。
+    const builtin = resolveClaudeBinary()
+    return { file: builtin ?? 'claude', argv: args }
+  }
   // 只允许安全字符，参数本身不含用户可控的 shell 元字符
   const quoted = args.map((a) => (/^[\w@./:=-]+$/.test(a) ? a : `"${a.replace(/"/g, '')}"`))
   return { file: 'cmd.exe', argv: ['/d', '/s', '/c', `claude ${quoted.join(' ')}`] }

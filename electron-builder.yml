@@ -23,10 +23,23 @@ nsis:
   deleteAppDataOnUninstall: false
 mac:
   # zip 是 Squirrel.Mac 自更新的必要产物，dmg 不能用于自动更新
-  target: [dmg, zip]
+  # 同时产出 arm64 与 x64：GitHub 的 macos-latest 是 arm64，
+  # 只出 arm64 会让 Intel Mac 用户完全装不了
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
   category: public.app-category.developer-tools
+  # 没有 Apple 开发者证书时用 ad-hoc 签名。未签名的 arm64 包
+  # 在 macOS 上会直接提示"已损坏"，连"仍要打开"的入口都没有。
+  # ad-hoc 至少能让系统允许运行（首次仍需右键打开）。
+  identity: '-'
+  # ad-hoc 签名与 hardenedRuntime 不兼容，必须关掉
+  hardenedRuntime: false
 linux:
-  target: [AppImage]
+  # AppImage 在 Ubuntu 22.04+ 默认缺 libfuse2 打不开，用 deb 兜底
+  target: [AppImage, deb]
   category: Development
 publish:
   provider: github

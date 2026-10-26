@@ -15,13 +15,16 @@ const MAX_WAIT_MS = 20 * 60 * 1000
 const POLL_MS = 15 * 1000
 
 /** 客户端真正需要的产物，缺一项都算发布不完整 */
+// macOS 同时产出 arm64 与 x64，两种架构都接受；
+// 写死单个架构会在 runner 换成 Intel 时误报"产物缺失"
+const MAC_ARCH = '(arm64|x64)'
 const REQUIRED = [
   { label: 'Windows 安装包', test: (n, v) => n === `ClaudeWorkbench-${v}-x64.exe` },
   { label: 'Windows 差分索引', test: (n, v) => n === `ClaudeWorkbench-${v}-x64.exe.blockmap` },
   { label: 'Linux AppImage', test: (n, v) => n === `ClaudeWorkbench-${v}-x86_64.AppImage` },
-  { label: 'macOS 安装包', test: (n, v) => n === `ClaudeWorkbench-${v}-arm64.dmg` },
+  { label: 'macOS 安装包', test: (n, v) => new RegExp(`^ClaudeWorkbench-${v}-${MAC_ARCH}\.dmg$`).test(n) },
   // Squirrel.Mac 自更新只认 zip，缺了它 mac 端永远更新不了
-  { label: 'macOS 自更新包', test: (n, v) => n === `ClaudeWorkbench-${v}-arm64.zip` },
+  { label: 'macOS 自更新包', test: (n, v) => new RegExp(`^ClaudeWorkbench-${v}-${MAC_ARCH}\.zip$`).test(n) },
   { label: 'Windows 更新元数据', test: (n) => n === 'latest.yml' },
   { label: 'macOS 更新元数据', test: (n) => n === 'latest-mac.yml' },
   { label: 'Linux 更新元数据', test: (n) => n === 'latest-linux.yml' }

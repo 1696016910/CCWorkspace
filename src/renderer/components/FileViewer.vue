@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { renderMarkdown } from '@/utils/markdown'
 
 const props = defineProps<{ path: string }>()
@@ -88,7 +88,17 @@ function extLabel(): string {
   return e || 'TEXT'
 }
 
-onMounted(load)
+/** Esc 关闭，与设置页、回收站保持一致 */
+function onEsc(e: KeyboardEvent): void {
+  if (e.key === 'Escape') emit('close')
+}
+
+onMounted(() => {
+  void load()
+  window.addEventListener('keydown', onEsc)
+})
+
+onUnmounted(() => window.removeEventListener('keydown', onEsc))
 watch(() => props.path, load)
 </script>
 
