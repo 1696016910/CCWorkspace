@@ -6,7 +6,7 @@ import type { UpdateStatus } from '../../shared/types'
 const { autoUpdater } = electronUpdater
 
 /** 产物发布所在的公开仓库，与 package.json 的 repository 保持一致 */
-const REPO = '__OWNER__/CCWorkspace'
+const REPO = '1696016910/CCWorkspace'
 const FEED_KEY = 'update_feed_prefix'
 
 let status: UpdateStatus | null = null

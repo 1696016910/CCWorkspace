@@ -55,14 +55,14 @@ describe('friendlyError 错误翻译', () => {
 describe('代理前缀', () => {
   it('默认留空表示直连', () => {
     expect(getFeedPrefix()).toBe('')
-    expect(feedUrl()).toBe('https://github.com/__OWNER__/CCWorkspace/releases/latest/download/')
+    expect(feedUrl()).toBe('https://github.com/1696016910/CCWorkspace/releases/latest/download/')
   })
 
   it('填写后拼接在前，并去掉尾部斜杠避免双斜杠', () => {
     setFeedPrefix('https://proxy.example.com/')
     expect(getFeedPrefix()).toBe('https://proxy.example.com')
     expect(feedUrl()).toBe(
-      'https://proxy.example.com/https://github.com/__OWNER__/CCWorkspace/releases/latest/download/'
+      'https://proxy.example.com/https://github.com/1696016910/CCWorkspace/releases/latest/download/'
     )
   })
 
