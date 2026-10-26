@@ -22,7 +22,7 @@ function languageOf(className: string | undefined): string {
  * Markdown 渲染是纯 HTML 字符串，无法直接挂 Vue 事件，因此复制按钮
  * 通过 `data-copy` 标记 + 事件委托实现（见 MessageItem）。
  */
-function decorateCodeBlocks(html: string): string {
+function decorateCodeBlocks(html: string, highlight: boolean): string {
   return html.replace(/<pre><code([^>]*)>([\s\S]*?)<\/code><\/pre>/g, (_all, attrs, body) => {
     const langMatch = /class="([^"]*)"/.exec(attrs)
     const lang = languageOf(langMatch?.[1]) || 'text'
@@ -35,7 +35,9 @@ function decorateCodeBlocks(html: string): string {
         .replace(/&gt;/g, '>')
         .replace(/&amp;/g, '&')
         .replace(/&quot;/g, '"')
-      const language = hljs.getLanguage(lang) ? lang : null
+      // 流式期间不做高亮：未闭合的代码围栏每一帧都要全量重高亮，
+      // 4 万字符的代码流能把 CPU 占用推到 800%+，永远追不上输出速度
+      const language = highlight && hljs.getLanguage(lang) ? lang : null
       // highlight.js 返回的就是安全 HTML（内容已转义、只含 span 标签），
       // 不能再整体转义，否则会把标签本身显示成文本
       const out = language ? hljs.highlight(decoded, { language }).value : null
@@ -66,16 +68,32 @@ function decorateCodeBlocks(html: string): string {
  *
  * 切会话时会把列表里的消息全部重渲染一次（实测 80 条约 200ms），
  * 而消息内容一旦入库就不再变化。按原文做 key 缓存后，
- * 来回切换几乎零成本。上限 300 条，避免长会话把内存吃满。
+ * 来回切换几乎零成本。
+ *
+ * 容量按"总字符数"而不是条数限制：流式期间每帧的全文长度都在涨，
+ * 300 条大内容能吃到 200MB+，按条数限流根本兜不住。
  */
 const cache = new Map<string, string>()
-const CACHE_MAX = 300
+/** 缓存原文总字符上限，约 4MB 堆占用 */
+const CACHE_MAX_CHARS = 2_000_000
+let cacheChars = 0
 
-export function renderMarkdown(source: string | null | undefined): string {
+/**
+ * @param cacheable 流式输出必须传 false。
+ *   流式每一帧的全文都是新字符串，缓存它们毫无复用价值，
+ *   还会把历史消息的缓存全部挤掉（实测一轮 20k 回复能塞满 300 条）。
+ */
+export function renderMarkdown(
+  source: string | null | undefined,
+  cacheable = true,
+  highlight = true
+): string {
   if (typeof source !== 'string' || source === '') return ''
 
-  const hit = cache.get(source)
-  if (hit !== undefined) return hit
+  if (cacheable) {
+    const hit = cache.get(source)
+    if (hit !== undefined) return hit
+  }
 
   let raw: string
   try {
@@ -89,7 +107,7 @@ export function renderMarkdown(source: string | null | undefined): string {
     raw = source.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c] ?? c)
   }
 
-  const decorated = decorateCodeBlocks(raw)
+  const decorated = decorateCodeBlocks(raw, highlight)
 
   const result = purifier.sanitize(decorated, {
     ADD_ATTR: ['target', 'data-file', 'data-copy', 'type', 'class'],
@@ -126,12 +144,18 @@ export function renderMarkdown(source: string | null | undefined): string {
     ]
   })
 
-  // 简单的 FIFO 淘汰：Map 保持插入顺序，超限时删最早的一条
-  if (cache.size >= CACHE_MAX) {
+  if (!cacheable) return result
+
+  // 按总字符数淘汰最早的条目
+  while (cacheChars + source.length > CACHE_MAX_CHARS && cache.size > 0) {
     const oldest = cache.keys().next().value
-    if (oldest !== undefined) cache.delete(oldest)
+    if (oldest === undefined) break
+    const oldValue = cache.get(oldest) ?? ''
+    cacheChars -= oldest.length + oldValue.length
+    cache.delete(oldest)
   }
   cache.set(source, result)
+  cacheChars += source.length + result.length
   return result
 }
 

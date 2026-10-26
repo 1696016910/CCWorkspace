@@ -122,10 +122,12 @@ async function scrollToBottom(smooth = false): Promise<void> {
   await nextTick()
   const el = thread.value
   if (!el) return
-  const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+  // 只读一次 scrollHeight：再读一次会多触发一次强制布局
+  const height = el.scrollHeight
+  const distance = height - el.scrollTop - el.clientHeight
   // 用户主动上翻超过一屏时不再强制跟随
   if (distance > el.clientHeight * 1.2) return
-  el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+  el.scrollTo({ top: height, behavior: smooth ? 'smooth' : 'auto' })
 }
 
 /**
@@ -227,7 +229,10 @@ function scheduleStreamRender(): void {
     return
   }
   const run = (): void => {
-    streamHtml.value = renderMarkdown(chat.streamText)
+    // 流式内容不缓存（每帧都是新字符串）也不高亮（未闭合代码块会反复全量重算）
+    streamHtml.value = renderMarkdown(chat.streamText, false, false)
+    // 只在真正更新 DOM 之后滚动：每 delta 都读 scrollHeight 会触发强制同步布局
+    void scrollToBottom(false)
     streamTimer = null
     if (streamPending) {
       streamPending = false
@@ -235,16 +240,14 @@ function scheduleStreamRender(): void {
     }
   }
   // 首帧立即出，保证"开始输出"没有延迟感
-  streamHtml.value = renderMarkdown(chat.streamText)
+  streamHtml.value = renderMarkdown(chat.streamText, false, false)
   streamTimer = setTimeout(run, 120)
 }
 
 watch(
   () => chat.streamText,
-  () => {
-    scheduleStreamRender()
-    void scrollToBottom(false)
-  }
+  // 只触发渲染；滚动在渲染回调里做，避免每个 delta 都读一次 scrollHeight
+  () => scheduleStreamRender()
 )
 
 /** 流式结束时清空缓冲，避免下一轮把旧 HTML 闪一下 */
