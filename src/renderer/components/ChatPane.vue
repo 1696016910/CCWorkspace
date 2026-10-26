@@ -65,6 +65,10 @@ async function loadContext(): Promise<void> {
 }
 
 let ctxPollTimer: ReturnType<typeof setTimeout> | null = null
+/** 组件已卸载：轮询恢复后不能再排新的定时器，否则永久 1.5s 一次打 IPC */
+let disposed = false
+/** 轮询次数上限，避免 /context 一直拿不到结果时无限重跑并反复拉起 CLI */
+const MAX_POLLS = 10
 
 async function toggleContext(): Promise<void> {
   ctxOpen.value = !ctxOpen.value
@@ -81,14 +85,15 @@ async function toggleContext(): Promise<void> {
  * 主进程在后台跑 /context 后才会写入分类明细，
  * 因此打开面板时轮询几次，拿到数据就停。
  */
-async function pollContext(): Promise<void> {
-  if (!ctxOpen.value) return
+async function pollContext(polls = 0): Promise<void> {
+  if (!ctxOpen.value || disposed) return
   ctxLoading.value = true
   await loadContext()
   ctxLoading.value = false
+  if (disposed) return
   const hasCats = (ctxDetail.value?.categories.length ?? 0) > 0
-  if (!hasCats && ctxOpen.value) {
-    ctxPollTimer = setTimeout(() => void pollContext(), 1500)
+  if (!hasCats && ctxOpen.value && polls < MAX_POLLS) {
+    ctxPollTimer = setTimeout(() => void pollContext(polls + 1), 1500)
   }
 }
 
@@ -117,12 +122,30 @@ async function scrollToBottom(smooth = false): Promise<void> {
   el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
 }
 
-function onMessageSaved(msg: ChatMessage): void {
-  sessions.messages = [...sessions.messages, msg]
+/**
+ * 删除当前会话。
+ *
+ * 必须先停掉生成：不停的话请求继续跑并计费，产出的回复又因为会话
+ * 已软删而写不进去，等于白花钱还多一条报错。
+ * 侧栏的删除按钮已有同样处理，这里补齐顶栏。
+ */
+async function removeCurrent(): Promise<void> {
+  const id = current.value?.id
+  if (!id) return
+  if (sessions.isRunning(id)) await chat.stop()
+  await sessions.remove(id)
+}
+
+function onMessageSaved(msg: ChatMessage, sessionId: string): void {
+  // 回复可能属于用户已经切走的会话。不判断就 append 会把 A 的回复
+  // 插进 B 的对话流里，看起来像"数据错乱"，重选会话才消失。
+  if (sessionId === sessions.currentId) {
+    sessions.messages = [...sessions.messages, msg]
+    // 一轮结束后主进程已写入新的上下文用量，重新读一次即可，无需再跑 /context
+    void refreshCtxFromCache()
+    void scrollToBottom()
+  }
   void sessions.load()
-  // 一轮结束后主进程已写入新的上下文用量，重新读一次即可，无需再跑 /context
-  void refreshCtxFromCache()
-  void scrollToBottom()
 }
 
 /** 只读缓存，不触发生成 */
@@ -133,7 +156,10 @@ async function refreshCtxFromCache(): Promise<void> {
 }
 
 onUnmounted(() => {
+  disposed = true
   if (ctxPollTimer) clearTimeout(ctxPollTimer)
+  // 订阅必须释放：否则边界重试重建组件后，事件仍进旧实例的闭包
+  chat.unlisten()
 })
 
 onMounted(() => {
@@ -255,6 +281,22 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
+/**
+ * Uint8Array → base64。
+ *
+ * 不能用 btoa(String.fromCharCode(...bytes))：展开运算符会把每个字节变成
+ * 一个实参，超过约 12 万字节就抛 RangeError。截图动辄几百 KB，
+ * 那条写法等于"粘贴图片必崩"。这里分块处理，任意大小都安全。
+ */
+function toBase64(buf: Uint8Array): string {
+  const CHUNK = 0x8000
+  let binary = ''
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    binary += String.fromCharCode(...buf.subarray(i, i + CHUNK))
+  }
+  return btoa(binary)
+}
+
 /** 支持从剪贴板粘贴图片或文件 */
 async function onPaste(e: ClipboardEvent): Promise<void> {
   const items = e.clipboardData?.items
@@ -265,11 +307,17 @@ async function onPaste(e: ClipboardEvent): Promise<void> {
     const file = item.getAsFile()
     if (!file) continue
     handled = true
-    const buf = await file.arrayBuffer()
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
-    const name = file.name || (file.type.startsWith('image/') ? `pasted-${Date.now()}.png` : `pasted-${Date.now()}`)
-    const saved = await window.api.file.savePaste(name, base64)
-    attachments.value = [...attachments.value, saved]
+    try {
+      const buf = await file.arrayBuffer()
+      const name =
+        file.name ||
+        (file.type.startsWith('image/') ? `pasted-${Date.now()}.png` : `pasted-${Date.now()}`)
+      const saved = await window.api.file.savePaste(name, toBase64(new Uint8Array(buf)))
+      attachments.value = [...attachments.value, saved]
+    } catch (err) {
+      // 单个附件失败不该让整次粘贴无反应，至少要给出可见提示
+      toast.error(err instanceof Error ? err.message : '附件保存失败')
+    }
   }
   if (handled) e.preventDefault()
 }
@@ -347,15 +395,35 @@ async function send(): Promise<void> {
   sessions.setRunning(current.value.id, true)
   void scrollToBottom()
 
-  const ok = await chat.send(current.value.id, prefix + text)
-  if (!ok) toast.error(chat.error ?? '发送失败')
+  const sessionId = current.value.id
+  const ok = await chat.send(sessionId, prefix + text)
+  if (!ok) {
+    // 发送失败时必须回滚：否则列表里留一条库里并不存在的消息，
+    // 侧栏绿点也会一直亮着，直到下次在该会话成功发送才消失
+    sessions.messages = sessions.messages.filter((m) => m.id !== optimistic.id)
+    sessions.setRunning(sessionId, false)
+    input.value = text
+    toast.error(chat.error ?? '发送失败')
+  }
 }
 
-/** 流式文本里的代码块复制 */
+/** 流式文本里的代码块复制与链接拦截 */
 async function onStreamClick(e: MouseEvent): Promise<void> {
   const target = e.target as HTMLElement
+
+  // 流式内容与历史消息一样是不可信文本，链接必须拦下来交给系统浏览器，
+  // 否则点击会让 Electron 窗口导航走，应用界面直接丢失
+  const link = target.closest('a')
+  if (link) {
+    e.preventDefault()
+    const href = link.getAttribute('href')
+    if (href) await window.api.system.openExternal(href)
+    return
+  }
+
   if (!target.matches('[data-copy]')) return
-  const code = target.closest('.code-block')?.querySelector('code')?.textContent ?? ''
+  // 必须限定在 pre 里：块内可能藏着其它 code 元素，取第一个会把用户看不见的内容复制走
+  const code = target.closest('.code-block')?.querySelector('pre code')?.textContent ?? ''
   if (!code) return
   try {
     await navigator.clipboard.writeText(code)
@@ -399,7 +467,7 @@ async function stop(): Promise<void> {
       <button v-if="current" class="mh-btn" title="复制会话" @click="sessions.duplicate(current.id)">
         <svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M15 5.5H6A1.5 1.5 0 004.5 7v9" /></svg>
       </button>
-      <button v-if="current" class="mh-btn" title="删除会话" @click="sessions.remove(current.id)">
+      <button v-if="current" class="mh-btn" title="删除会话" @click="removeCurrent">
         <svg viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13" /><path d="M10.5 10v6M13.5 10v6" /></svg>
       </button>
     </div>

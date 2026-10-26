@@ -50,14 +50,20 @@ async function closeSettings(): Promise<void> {
 <template>
   <div class="app">
     <div class="workspace">
-      <Sidebar @open-settings="settingsOpen = true" @open-trash="trashOpen = true" />
+      <ErrorBoundary>
+        <Sidebar @open-settings="settingsOpen = true" @open-trash="trashOpen = true" />
+      </ErrorBoundary>
       <ErrorBoundary>
         <ChatPane />
       </ErrorBoundary>
     </div>
 
-    <SettingsPage v-if="settingsOpen" @close="closeSettings" />
-    <TrashDialog v-if="trashOpen" @close="trashOpen = false" @restored="sessions.load()" />
+    <ErrorBoundary v-if="settingsOpen">
+      <SettingsPage @close="closeSettings" />
+    </ErrorBoundary>
+    <ErrorBoundary v-if="trashOpen">
+      <TrashDialog @close="trashOpen = false" @restored="sessions.load()" />
+    </ErrorBoundary>
     <ToastHost />
   </div>
 </template>

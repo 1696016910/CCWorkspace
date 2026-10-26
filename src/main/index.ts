@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from 'electron'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { initDb, closeDb } from './db'
 import {
@@ -24,7 +25,17 @@ import {
   restoreSession,
   purgeSession
 } from './services/session'
-import { assertCanSend, compact, getContextUsage, interrupt, listCommands, refreshContext, send } from './services/chat'
+import {
+  assertCanSend,
+  compact,
+  forgetContext,
+  getContextUsage,
+  interrupt,
+  isRunning,
+  listCommands,
+  refreshContext,
+  send
+} from './services/chat'
 import {
   getLastReadError,
   readEnv,
@@ -146,6 +157,9 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      // 沙箱模式下 preload 只支持 CommonJS，而 electron-vite 输出的是 ESM(.mjs)，
+      // 开启会导致 window.api 整个不存在、界面全白。
+      // 真正的防护靠上面几层：导航精确比对、IPC 来源校验、CSP、DOMPurify。
       sandbox: false
     }
   })
@@ -159,12 +173,34 @@ function createWindow(): void {
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = setTimeout(saveWindowState, 400)
   }
+  // 窗口销毁后必须置空：macOS 上关窗不退出进程，
+  // 再次从 Dock 启动时 second-instance 会拿到已销毁对象并抛
+  // "Object has been destroyed"，窗口再也打不开。
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
+
   mainWindow.on('resize', scheduleSave)
   mainWindow.on('move', scheduleSave)
   mainWindow.on('close', saveWindowState)
 
+  /**
+   * 只允许应用自身的页面加载。
+   *
+   * preload 会随每次导航重新注入，一旦窗口被导航到外部网址，
+   * 那个网页的 JS 就能直接拿到 window.api 的 57 个通道，
+   * 等于把读文件、改配置、装插件的能力交给任意网站。
+   * 所以这里是安全边界，不是体验优化。
+   */
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isAppUrl(url)) return
+    event.preventDefault()
+    void openExternalSafely(url)
+  })
+
+  // 新开窗口一律拒绝，交给系统浏览器
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    void openExternalSafely(url)
     return { action: 'deny' }
   })
 
@@ -175,9 +211,70 @@ function createWindow(): void {
   }
 }
 
+/**
+ * 只允许 http/https 交给系统浏览器。
+ *
+ * 自定义协议（ms-settings:、file: 等）能直接拉起本地程序或系统面板，
+ * 这些入口全部来自不可信内容（模型输出、文件预览里的链接），必须挡住。
+ */
+async function openExternalSafely(url: string): Promise<void> {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return
+    await shell.openExternal(url)
+  } catch {
+    // 畸形 URL 直接忽略，不弹错打扰用户
+  }
+}
+
+/**
+ * 校验 IPC 调用确实来自应用自己的页面。
+ *
+ * will-navigate 已经挡掉了大部分导航，但校验来源是最后一道防线：
+ * 万一窗口被以别的方式加载了外部内容，这里能拦住它拿到文件读取、
+ * 配置修改、插件安装这些能力。senderFrame 是 Electron 提供的真实来源，
+ * 不能靠渲染层自己声明的参数。
+ */
+/**
+ * 应用自身的页面地址。
+ *
+ * 不能用 `startsWith('file://')` 判断"是不是自己人"：
+ * 任何本地 HTML 文件、UNC 共享（\\attacker\share\x.html）都是 file://，
+ * 它们一旦被加载，preload 会重新注入，那个页面的脚本就能调用全部 IPC。
+ */
+function appUrl(): string {
+  const devUrl = process.env['ELECTRON_RENDERER_URL']
+  if (devUrl) return devUrl
+  return pathToFileURL(join(__dirname, '../renderer/index.html')).href
+}
+
+/**
+ * 规范化后精确比较，避免把同目录下的其它页面当成自己。
+ *
+ * 必须用 URL 解析而不是字符串比较：Chromium 会把 frame.url 规范化成
+ * 带尾斜杠的形式（http://localhost:5173 → http://localhost:5173/），
+ * 直接比字符串会让开发模式下所有 IPC 都被判成非法来源。
+ */
+function isAppUrl(url: string): boolean {
+  try {
+    const a = new URL(url)
+    const b = new URL(appUrl())
+    return a.origin === b.origin && a.pathname === b.pathname
+  } catch {
+    return false
+  }
+}
+
+function fromOurPage(event: Electron.IpcMainInvokeEvent): boolean {
+  const frame = event.senderFrame
+  if (!frame) return false
+  return isAppUrl(frame.url)
+}
+
 /** 统一把异常转成渲染层可读的错误，避免 IPC 调用直接 reject 而丢信息 */
 function handle(channel: string, fn: (...args: never[]) => unknown): void {
-  ipcMain.handle(channel, async (_event, ...args) => {
+  ipcMain.handle(channel, async (event, ...args) => {
+    if (!fromOurPage(event)) throw new Error('非法调用来源')
     try {
       return await (fn as (...a: unknown[]) => unknown)(...args)
     } catch (e) {
@@ -191,11 +288,24 @@ function registerIpc(): void {
   handle('theme:get', () => getTheme())
   handle('theme:set', (theme: 'light' | 'dark') => setTheme(theme))
 
-  /* 打开文件或目录（用于点击生成的文件） */
-  handle('file:open', async (path: string) => {
-    const err = await shell.openPath(path)
-    if (err) throw new Error(err)
+  /**
+   * 用系统浏览器打开外部链接。
+   * 渲染层拦截了所有 <a> 点击，避免 Electron 窗口被导航走导致应用界面丢失。
+   * 只接受 http/https，防止被诱导打开本地程序或自定义协议。
+   */
+  handle('system:openExternal', async (url: string) => {
+    let parsed: URL
+    try {
+      parsed = new URL(url)
+    } catch {
+      throw new Error('无效的链接')
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('只支持 http/https 链接')
+    }
+    await shell.openExternal(url)
   })
+
 
   /**
    * 读取文件内容供应用内预览。
@@ -203,11 +313,50 @@ function registerIpc(): void {
    */
   handle('file:read', async (path: string) => {
     const { readFile, stat } = await import('node:fs/promises')
-    const { extname, basename } = await import('node:path')
+    const { extname, basename, resolve, sep } = await import('node:path')
+
+    if (typeof path !== 'string' || !path.trim()) throw new Error('路径不能为空')
+    // UNC（\\host\share）会在打开时向远端发起 SMB 认证，可能外泄 NTLM 凭据
+    if (/^[\\/]{2}/.test(path)) throw new Error('不支持网络路径')
+
+    /**
+     * 只允许读取工作区内的文件。
+     * 预览入口来自模型输出，属于不可信内容：不加限制的话，
+     * 一个指向 ~/.ssh/id_rsa 或 .claude/settings.json 的芯片
+     * 点一下就能把私钥 / API Token 明文显示在界面上。
+     */
+    const within = (p: string, root: string): boolean => {
+      const base = root.endsWith(sep) ? root : root + sep
+      return p === root || p.startsWith(base)
+    }
+
+    const { realpath } = await import('node:fs/promises')
+    const literal = resolve(path)
+    const roots = listWorkspaces().map((w) => resolve(w.path))
+    if (!roots.some((r) => within(literal, r))) {
+      throw new Error('只能预览当前工作区内的文件')
+    }
+
+    // 再解析一次真实路径：工作区内可以放一个指向 ~/.claude 的 junction/symlink，
+    // 字面路径检查会放行，实际读到的却是工作区外的文件
+    let target = literal
+    try {
+      const real = await realpath(literal)
+      const realRoots = await Promise.all(
+        roots.map((r) => realpath(r).catch(() => r))
+      )
+      if (!realRoots.some((r) => within(real, r))) {
+        throw new Error('该路径指向工作区外，已阻止预览')
+      }
+      target = real
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('工作区外')) throw e
+      // 文件不存在等：后面统一报"无法访问"
+    }
 
     let info
     try {
-      info = await stat(path)
+      info = await stat(target)
     } catch {
       throw new Error('文件不存在或无法访问')
     }
@@ -218,7 +367,7 @@ function registerIpc(): void {
       throw new Error(`文件过大（${Math.round(info.size / 1024)} KB），暂不支持预览`)
     }
 
-    const ext = extname(path).toLowerCase()
+    const ext = extname(target).toLowerCase()
     const binaryExts = new Set([
       '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp',
       '.pdf', '.zip', '.gz', '.7z', '.rar', '.exe', '.dll', '.so',
@@ -231,7 +380,7 @@ function registerIpc(): void {
     // 先按字节读入，再判断编码：Windows 上的中文文档常是 GBK
     let buf: Buffer
     try {
-      buf = await readFile(path)
+      buf = await readFile(target)
     } catch {
       throw new Error('读取失败：文件无法访问')
     }
@@ -254,8 +403,8 @@ function registerIpc(): void {
     }
 
     return {
-      path,
-      name: basename(path),
+      path: target,
+      name: basename(target),
       ext,
       size: info.size,
       content
@@ -333,7 +482,10 @@ function registerIpc(): void {
   handle('session:remove', (id: string) => deleteSession(id))
   handle('session:restore', (id: string) => restoreSession(id))
   handle('session:duplicate', (id: string) => duplicateSession(id))
-  handle('session:purge', (id: string) => purgeSession(id))
+  handle('session:purge', (id: string) => {
+    purgeSession(id)
+    forgetContext(id)
+  })
 
   /* 对话 */
   handle('chat:send', async (sessionId: string, text: string) => {
@@ -457,7 +609,10 @@ if (!gotLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    if (!mainWindow) return
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createWindow()
+      return
+    }
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
   })
@@ -502,16 +657,24 @@ function installMenu(): void {
 }
 
 app.whenReady().then(() => {
+  // app.quit() 是异步的，拿不到锁时 whenReady 仍会触发。
+  // 不在这里二次拦截，第二个实例会打开同一个数据库并并发迁移。
+  if (!gotLock) return
+
   try {
     initDb()
   } catch (e) {
     // 数据库无法初始化时仍要给出可见反馈，而不是静默退出
+    const detail = e instanceof Error ? e.message : String(e)
     dialog.showErrorBox(
       '数据库初始化失败',
-      `${e instanceof Error ? e.message : String(e)}
+      `${detail}
 
-请删除用户数据目录下的 workbench.db 后重试。`
+如果是提示"正被另一个进程使用"，请先关闭其他实例。
+否则请备份用户数据目录下的 workbench.db 后再手动处理。`
     )
+    app.quit()
+    return
   }
   installMenu()
   registerIpc()
@@ -527,6 +690,35 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => {
+let quittingWhileBusy = false
+
+/**
+ * 退出前先收尾正在跑的回复。
+ *
+ * closeDb() 之后 appendMessage 会抛"数据库尚未初始化"，这一轮的回复
+ * 就永久丢失了（用户白花了 token）。所以有请求在跑时先中断它，
+ * 让 send() 走完自己的收尾路径再关库。
+ */
+app.on('before-quit', (event) => {
+  if (isRunning() && !quittingWhileBusy) {
+    event.preventDefault()
+    quittingWhileBusy = true
+    void interrupt()
+    // 给收尾留出时间：写入消息、emit done、关闭迭代器
+    setTimeout(() => {
+      closeDb()
+      app.quit()
+    }, 800)
+    return
+  }
   closeDb()
+})
+
+/** 未捕获异常至少留下痕迹，否则问题会静默消失 */
+process.on('uncaughtException', (e) => {
+  console.error('[main] uncaughtException:', e)
+})
+
+process.on('unhandledRejection', (e) => {
+  console.error('[main] unhandledRejection:', e)
 })

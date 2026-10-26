@@ -11,10 +11,27 @@ interface CliPlugin {
   enabled?: boolean
 }
 
+/**
+ * npm 全局安装的 CLI 在 Windows 上是 claude.cmd 这个批处理垫片，
+ * execFile 不查 PATHEXT 也不经 cmd.exe，直接 spawn `claude` 必然 ENOENT。
+ * 这里显式走 cmd.exe 调用，并把参数逐层转义，避免命令注入。
+ */
+function cliCommand(args: string[]): { file: string; argv: string[] } {
+  if (process.platform !== 'win32') return { file: 'claude', argv: args }
+  // 只允许安全字符，参数本身不含用户可控的 shell 元字符
+  const quoted = args.map((a) => (/^[\w@./:=-]+$/.test(a) ? a : `"${a.replace(/"/g, '')}"`))
+  return { file: 'cmd.exe', argv: ['/d', '/s', '/c', `claude ${quoted.join(' ')}`] }
+}
+
 /** CLI 不可用时抛出可读错误，由上层转成界面提示 */
 async function callCli(args: string[]): Promise<string> {
+  const { file, argv } = cliCommand(args)
   try {
-    const { stdout } = await run('claude', args, { timeout: 15000, maxBuffer: 8 * 1024 * 1024 })
+    const { stdout } = await run(file, argv, {
+      timeout: 15000,
+      maxBuffer: 8 * 1024 * 1024,
+      windowsHide: true
+    })
     return stdout
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)

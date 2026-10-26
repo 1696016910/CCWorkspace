@@ -81,8 +81,36 @@ export function renderMarkdown(source: string | null | undefined): string {
   return purifier.sanitize(decorated, {
     ADD_ATTR: ['target', 'data-file', 'data-copy', 'type', 'class'],
     ADD_TAGS: ['button', 'span'],
-    FORBID_TAGS: ['style', 'script', 'iframe', 'object', 'embed'],
-    FORBID_ATTR: ['onerror', 'onload', 'onclick']
+    // map/area 必须禁：<area href> 是链接，但 closest('a') 抓不到它，
+    // 点击后窗口会直接导航到目标地址，绕过全部链接拦截
+    FORBID_TAGS: [
+      'style',
+      'script',
+      'iframe',
+      'object',
+      'embed',
+      'form',
+      'input',
+      'meta',
+      'link',
+      'map',
+      'area',
+      'base'
+    ],
+    // style 属性可被用来做 CSS 注入与外部请求外带（background:url(https://evil/...)），
+    // 聊天内容没有任何场景需要它，直接禁掉
+    // hidden 也要禁：可以藏一段内容，让"复制"拿到与用户所见不同的文本
+    FORBID_ATTR: [
+      'onerror',
+      'onload',
+      'onclick',
+      'style',
+      'formaction',
+      'action',
+      'srcdoc',
+      'hidden',
+      'usemap'
+    ]
   })
 }
 

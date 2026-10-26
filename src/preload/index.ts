@@ -43,13 +43,18 @@ const api = {
     pickFiles: (): Promise<string[]> => unwrap(ipcRenderer.invoke('dialog:pickFiles'))
   },
 
+  system: {
+    /** 用系统浏览器打开 http/https 链接 */
+    openExternal: (url: string): Promise<void> =>
+      unwrap(ipcRenderer.invoke('system:openExternal', url))
+  },
+
   theme: {
     get: (): Promise<'light' | 'dark'> => unwrap(ipcRenderer.invoke('theme:get')),
     set: (theme: 'light' | 'dark'): Promise<void> => unwrap(ipcRenderer.invoke('theme:set', theme))
   },
 
   file: {
-    open: (path: string): Promise<void> => unwrap(ipcRenderer.invoke('file:open', path)),
     savePaste: (name: string, base64: string): Promise<string> =>
       unwrap(ipcRenderer.invoke('file:savePaste', name, base64)),
     read: (

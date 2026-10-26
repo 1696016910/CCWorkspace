@@ -70,13 +70,20 @@ export const useSessionStore = defineStore('session', () => {
   async function select(id: string): Promise<void> {
     const token = ++selectToken
     currentId.value = id
-    const [loaded, total] = await Promise.all([
-      window.api.session.messages(id, PAGE_SIZE),
-      window.api.session.messageCount(id)
-    ])
-    if (token !== selectToken) return
-    messages.value = loaded
-    messageTotal.value = total
+    messages.value = []
+    messageTotal.value = 0
+    try {
+      const [loaded, total] = await Promise.all([
+        window.api.session.messages(id, PAGE_SIZE),
+        window.api.session.messageCount(id)
+      ])
+      if (token !== selectToken) return
+      messages.value = loaded
+      messageTotal.value = total
+    } catch (e) {
+      if (token !== selectToken) return
+      error.value = e instanceof Error ? e.message : String(e)
+    }
   }
 
   /** 加载更早的一页，追加到列表头部 */
@@ -85,14 +92,17 @@ export const useSessionStore = defineStore('session', () => {
     if (!id || loadingEarlier.value) return
     if (messages.value.length >= messageTotal.value) return
 
+    const token = ++selectToken
     loadingEarlier.value = true
     try {
       const all = await window.api.session.messages(id)
+      // 请求期间用户可能已经切走，这时结果属于旧会话，不能往新会话里拼
+      if (token !== selectToken || currentId.value !== id) return
       // 一次取回全部再截取，数据量在本地可控；避免复杂游标
       const already = messages.value.length
-      messages.value = all.slice(Math.max(0, all.length - already - PAGE_SIZE), all.length - already).concat(
-        messages.value
-      )
+      messages.value = all
+        .slice(Math.max(0, all.length - already - PAGE_SIZE), all.length - already)
+        .concat(messages.value)
     } finally {
       loadingEarlier.value = false
     }
@@ -116,10 +126,13 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function remove(id: string): Promise<void> {
+    // 先作废在飞的 select/loadEarlier，避免它们的返回把已删会话的消息写回来
+    selectToken++
     await window.api.session.remove(id)
     if (currentId.value === id) {
       currentId.value = null
       messages.value = []
+      messageTotal.value = 0
     }
     await load()
   }

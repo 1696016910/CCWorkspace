@@ -11,9 +11,20 @@ const copied = ref(false)
 /** 代码块复制按钮的事件委托（HTML 由 markdown 渲染生成） */
 async function onBodyClick(e: MouseEvent): Promise<void> {
   const target = e.target as HTMLElement
+
+  // 链接必须拦下来交给系统浏览器。不拦的话 Electron 会让当前窗口直接导航过去，
+  // 应用界面被替换成网页且没有后退入口，只能杀进程重开。
+  const link = target.closest('a')
+  if (link) {
+    e.preventDefault()
+    const href = link.getAttribute('href')
+    if (href) await window.api.system.openExternal(href)
+    return
+  }
+
   if (!target.matches('[data-copy]')) return
   const block = target.closest('.code-block')
-  const code = block?.querySelector('code')?.textContent ?? ''
+  const code = block?.querySelector('pre code')?.textContent ?? ''
   if (!code) return
   try {
     await navigator.clipboard.writeText(code)

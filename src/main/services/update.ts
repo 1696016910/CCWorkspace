@@ -34,8 +34,25 @@ export function getFeedPrefix(): string {
 
 export function setFeedPrefix(prefix: string): void {
   const trimmed = prefix.trim().replace(/\/+$/, '')
-  if (trimmed && !/^https?:\/\//i.test(trimmed)) {
-    throw new Error('代理前缀必须以 http:// 或 https:// 开头')
+  if (trimmed) {
+    // 只检查前缀协议不够：含空格会让 new URL 抛错，
+    // 带 ?query 或 #fragment 会把后续的 GitHub 路径整段吃掉，
+    // 两种情况都会让"检查更新"永久静默失败。
+    let parsed: URL
+    try {
+      parsed = new URL(trimmed)
+    } catch {
+      throw new Error('代理前缀不是合法地址')
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('代理前缀必须以 http:// 或 https:// 开头')
+    }
+    if (parsed.search || parsed.hash) {
+      throw new Error('代理前缀不能包含 ? 或 #，否则会丢掉更新文件的路径')
+    }
+    if (/\s/.test(trimmed)) {
+      throw new Error('代理前缀不能包含空格')
+    }
   }
   getDb()
     .prepare(

@@ -64,6 +64,13 @@ export async function writeSettings(
 ): Promise<void> {
   const p = claudeSettingsPath()
 
+  // 文件当前无法解析时绝不能写：
+  // readRaw 会返回 {}，而保存是用 {...raw, env} 覆盖整份文件，
+  // 那样 hooks / permissions / statusLine / enabledPlugins 等字段会被全部抹掉。
+  if (lastReadError) {
+    throw new Error('settings.json 当前无法解析，为避免覆盖其它配置已阻止保存。请先修复该文件后重启应用')
+  }
+
   if (expectedMtime !== undefined && expectedMtime !== null) {
     const current = await statSettings()
     if (current !== null && Math.abs(current - expectedMtime) > 1) {
@@ -79,7 +86,10 @@ export async function writeSettings(
   }
 
   const tmp = `${p}.tmp-${Date.now()}`
-  await writeFile(tmp, JSON.stringify(next, null, 2), 'utf-8')
+  // 显式 0600：rename 会保留临时文件的权限而不是原文件的。
+  // 用默认 0644 的话，用户原本收紧过权限的 settings.json（内含 API Token）
+  // 会在保存后被同机其它用户读到。
+  await writeFile(tmp, JSON.stringify(next, null, 2), { encoding: 'utf-8', mode: 0o600 })
   await rename(tmp, p)
 }
 
@@ -117,8 +127,19 @@ export function validateEnv(entries: EnvEntry[]): string | null {
   for (const e of entries) {
     const key = e.key.trim()
     if (!key) return '键名不能为空'
+    // 环境变量名只允许字母数字下划线，且不能以数字开头。
+    // 不校验的话，`__proto__` 这类键在赋值时会改到原型上，变量静默消失。
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      return `键名不合法：${key}（只允许字母、数字、下划线，且不能以数字开头）`
+    }
+    // 这些名字在普通对象上赋值会改到原型链，变量会静默消失
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      return `键名不允许使用保留名：${key}`
+    }
     if (seen.has(key)) return `键名重复：${key}`
-    if (/[\r\n]/.test(e.value)) return `值不能包含换行：${key}`
+    // NUL 会让 CLI 的 spawn 直接抛 "must be a string without null bytes"，
+    // 整轮对话都用不了，用户很难联想到是环境变量导致的
+    if (/[\r\n\0]/.test(e.value)) return `值不能包含换行或空字符：${key}`
     seen.add(key)
   }
   return null
@@ -131,7 +152,8 @@ export async function saveEnv(entries: EnvEntry[]): Promise<void> {
 
   const mtime = await statSettings()
   const raw = await readRaw()
-  const env: Record<string, string> = {}
+  // 用 Object.create(null) 避免键名触发原型链赋值
+  const env: Record<string, string> = Object.create(null) as Record<string, string>
   for (const e of entries) env[e.key.trim()] = e.value
   await writeSettings({ ...raw, env }, mtime)
 }

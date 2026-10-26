@@ -21,10 +21,12 @@ async function load(): Promise<void> {
 async function save(): Promise<void> {
   saving.value = true
   try {
+    // allow/deny 是 Vue 响应式数组，直接传给 ipcRenderer 会因结构化克隆
+    // 拒绝 Proxy 而报 "An object could not be cloned"。必须复制成普通数组。
     await window.api.config.savePermissions({
       defaultMode: defaultMode.value,
-      allow: allow.value,
-      deny: deny.value
+      allow: [...allow.value],
+      deny: [...deny.value]
     })
     message.value = '已保存'
     setTimeout(() => (message.value = null), 3000)

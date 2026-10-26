@@ -3,13 +3,25 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { useToast } from '@/composables/useToast'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSessionStore } from '@/stores/session'
+import { useChatStore } from '@/stores/chat'
 import type { SessionSummary } from '@shared/types'
 
 const emit = defineEmits<{ 'open-settings': []; 'open-trash': [] }>()
 
 const ws = useWorkspaceStore()
 const sessions = useSessionStore()
+const chat = useChatStore()
 const toast = useToast()
+
+/**
+ * 删除会话前先停掉它的生成。
+ * 不停的话请求会继续跑并计费，产出的回复又因为会话已软删而被丢弃，
+ * 等于白花钱；同时侧栏绿点会一直亮着。
+ */
+async function removeSession(id: string): Promise<void> {
+  if (sessions.isRunning(id)) await chat.stop()
+  await sessions.remove(id)
+}
 
 onMounted(async () => {
   theme.value = await window.api.theme.get()
@@ -230,7 +242,7 @@ function relativeTime(iso: string): string {
                 <button
                   class="edit-btn"
                   title="删除会话"
-                  @click.stop="sessions.remove(s.id)"
+                  @click.stop="removeSession(s.id)"
                 >
                   ✕
                 </button>

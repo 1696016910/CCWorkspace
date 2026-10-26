@@ -46,7 +46,16 @@ function toSummary(row: SessionRow): SessionSummary {
 export function deriveTitle(text: string): string {
   const oneLine = text.replace(/\s+/g, ' ').trim()
   if (!oneLine) return '(新会话)'
-  return oneLine.length > TITLE_MAX ? `${oneLine.slice(0, TITLE_MAX)}…` : oneLine
+  if (oneLine.length <= TITLE_MAX) return oneLine
+
+  // 直接 slice 会从一个 emoji 的代理对中间切开，留下孤立半字符渲染成方块。
+  // 用 Array.from 按码点切，再按码元预算回退到不超长的位置。
+  let cut = ''
+  for (const ch of oneLine) {
+    if (cut.length + ch.length > TITLE_MAX) break
+    cut += ch
+  }
+  return `${cut}…`
 }
 
 /** 列出未删除的会话，按工作区分组由渲染层处理 */
@@ -146,7 +155,13 @@ export function purgeSession(id: string): void {
     db.prepare('DELETE FROM sessions WHERE id = ?').run(id)
     db.exec('COMMIT')
   } catch (e) {
-    db.exec('ROLLBACK')
+    // SQLITE_FULL 等错误会让 SQLite 自动回滚，此时 ROLLBACK 会抛
+    // "cannot rollback - no transaction is active"，把真实原因盖掉
+    try {
+      db.exec('ROLLBACK')
+    } catch {
+      // 事务已不存在
+    }
     throw e
   }
 }
@@ -162,12 +177,18 @@ export function duplicateSession(id: string): SessionSummary {
   const now = new Date().toISOString()
   const newId = randomUUID()
   const title = src.title ? `${src.title} 副本` : ''
+  // 源会话还没有标题时，副本也必须保留 auto_title=1，
+  // 否则它永远等不到首条消息自动命名，侧栏会一直显示"新会话"。
+  const autoTitle = src.title ? 0 : 1
 
   db.exec('BEGIN')
   try {
+    // 不继承 claude_session_id：副本是新的对话分支，
+    // 复用原 CLI 会话会让两条线互相污染。界面上有历史消息，
+    // 但模型上下文从零开始，这一点由 UI 的上下文占比体现。
     db.prepare(
-      'INSERT INTO sessions(id, workspace_id, title, auto_title, created_at, updated_at) VALUES(?, ?, ?, 0, ?, ?)'
-    ).run(newId, src.workspace_id, title, now, now)
+      'INSERT INTO sessions(id, workspace_id, title, auto_title, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?)'
+    ).run(newId, src.workspace_id, title, autoTitle, now, now)
 
     const messages = db
       .prepare('SELECT id, role, content, tools, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC')
@@ -180,7 +201,13 @@ export function duplicateSession(id: string): SessionSummary {
     }
     db.exec('COMMIT')
   } catch (e) {
-    db.exec('ROLLBACK')
+    // SQLITE_FULL 等错误会让 SQLite 自动回滚，此时 ROLLBACK 会抛
+    // "cannot rollback - no transaction is active"，把真实原因盖掉
+    try {
+      db.exec('ROLLBACK')
+    } catch {
+      // 事务已不存在
+    }
     throw e
   }
 
@@ -258,13 +285,14 @@ export function appendMessage(
   const now = new Date().toISOString()
   const id = randomUUID()
 
-  // 会话已被软删除时不再写入，避免「删除后仍产生新消息」
+  // 会话已被软删除时不再写入。
+  // 这里必须抛错而不是返回一个假对象：返回假对象会让上层以为写入成功，
+  // 界面上消息看着发出去了，刷新后却消失，用户完全不知道发生了什么。
   const target = db
     .prepare('SELECT deleted_at FROM sessions WHERE id = ?')
     .get(sessionId) as { deleted_at?: string | null } | undefined
-  if (!target || target.deleted_at) {
-    return { id, role, text: content, tools, timestamp: now }
-  }
+  if (!target) throw new Error('会话不存在')
+  if (target.deleted_at) throw new Error('会话已被删除，消息未保存')
 
   db.prepare(
     'INSERT INTO messages(id, session_id, role, content, tools, created_at) VALUES(?, ?, ?, ?, ?, ?)'

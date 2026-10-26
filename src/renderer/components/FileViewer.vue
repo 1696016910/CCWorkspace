@@ -54,12 +54,23 @@ async function copyAll(): Promise<void> {
   }
 }
 
-/** 代码块复制按钮（Markdown 预览内的委托） */
+/** 代码块复制与链接拦截（Markdown 预览内的委托） */
 async function onPreviewClick(e: MouseEvent): Promise<void> {
   const target = e.target as HTMLElement
+
+  // 预览的 Markdown 来自本地文件，同样可能含有链接。
+  // 不拦截会让整个应用窗口被导航走，界面丢失无法返回。
+  const link = target.closest('a')
+  if (link) {
+    e.preventDefault()
+    const href = link.getAttribute('href')
+    if (href) await window.api.system.openExternal(href)
+    return
+  }
+
   if (!target.matches('[data-copy]')) return
   const block = target.closest('.code-block')
-  const code = block?.querySelector('code')?.textContent ?? ''
+  const code = block?.querySelector('pre code')?.textContent ?? ''
   if (!code) return
   try {
     await navigator.clipboard.writeText(code)

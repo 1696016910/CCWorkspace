@@ -67,8 +67,14 @@ describe('代理前缀', () => {
   })
 
   it('拒绝非 http(s) 前缀', () => {
-    expect(() => setFeedPrefix('proxy.example.com')).toThrow('http')
+    expect(() => setFeedPrefix('proxy.example.com')).toThrow()
     expect(() => setFeedPrefix('ftp://x')).toThrow('http')
+  })
+
+  it('拒绝含空格或 ?/# 的前缀（否则更新地址会被解析坏）', () => {
+    expect(() => setFeedPrefix('https://a b.com')).toThrow()
+    expect(() => setFeedPrefix('https://p.com/?token=1')).toThrow()
+    expect(() => setFeedPrefix('https://p.com/#frag')).toThrow()
   })
 
   it('清空后恢复直连', () => {

@@ -4,15 +4,21 @@ import { appendMessage, getClaudeSessionId, setClaudeSessionId, setContextUsage 
 import { readModels, readPermissions, readRaw } from './claudeSettings'
 import { resolveClaudeBinary } from './binary'
 
+/**
+ * runId 标识"哪一轮"。
+ *
+ * 停止后立刻重发时，旧 run 的 done 会晚于新 run 的 start 到达；
+ * 渲染层若只按 sessionId 判断归属，旧 done 会把新回复的流式显示清掉。
+ */
 export type ChatEvent =
-  | { type: 'start'; sessionId: string }
-  | { type: 'text'; sessionId: string; delta: string }
-  | { type: 'tool'; sessionId: string; tool: ToolCall }
-  | { type: 'done'; sessionId: string; message: ChatMessage; usage: Usage }
-  | { type: 'error'; sessionId: string; message: string }
-  | { type: 'interrupted'; sessionId: string }
-  | { type: 'compacted'; sessionId: string }
-  | { type: 'commands'; sessionId: string }
+  | { type: 'start'; sessionId: string; runId: number }
+  | { type: 'text'; sessionId: string; runId: number; delta: string }
+  | { type: 'tool'; sessionId: string; runId: number; tool: ToolCall }
+  | { type: 'done'; sessionId: string; runId: number; message: ChatMessage; usage: Usage }
+  | { type: 'error'; sessionId: string; runId: number; message: string }
+  | { type: 'interrupted'; sessionId: string; runId: number }
+  | { type: 'compacted'; sessionId: string; runId: number }
+  | { type: 'commands'; sessionId: string; runId: number }
 
 export interface Usage {
   inputTokens: number
@@ -22,13 +28,25 @@ export interface Usage {
   percentage: number
 }
 
+/**
+ * SDK 的 skills 字段语义是"白名单"，省略表示沿用 CLI 默认（即全部可用）。
+ * 所以用户把 Skill 全关掉时必须显式传空数组，传 undefined 反而等于全开。
+ */
+function skillsOption(skills: string[]): string[] {
+  return skills
+}
+
 /** 单轮输出的安全上限，防止异常模型行为撑爆内存与数据库 */
 const MAX_OUTPUT_CHARS = 400_000
 /** 单轮工具调用记录上限 */
 const MAX_TOOLS = 500
 
 interface ActiveRun {
+  /** 每次运行唯一，收尾时只有 id 对得上才允许清空 active */
+  id: number
   abort: () => void
+  /** 立刻释放占位（用于 interrupt），后续收尾不会再误清别人的 active */
+  release: () => void
 }
 
 /** SDK 的 Query 句柄，用于查询上下文与命令列表 */
@@ -46,6 +64,8 @@ interface QueryHandle {
 }
 
 let active: ActiveRun | null = null
+/** 运行序号，用来识别"这一轮是否仍然是当前占用者" */
+let runSeq = 0
 /** 最后结束那一轮抓到的上下文快照，按会话 id 隔离 */
 const ctxSnapshots = new Map<
   string,
@@ -70,9 +90,18 @@ export function isRunning(): boolean {
   return active !== null
 }
 
+/** 会话被彻底删除时释放它的上下文快照，否则这个 Map 只增不减 */
+export function forgetContext(sessionId: string): void {
+  ctxSnapshots.delete(sessionId)
+}
+
 export function interrupt(): void {
-  active?.abort()
-  active = null
+  const run = active
+  if (!run) return
+  run.abort()
+  // 立刻让位，用户可以马上发下一条；
+  // 旧 run 收尾时 release() 会发现 active 已不是自己，不会误清新的占位
+  run.release()
 }
 
 /** 把一条用户消息包成 SDK 的流式输入项 */
@@ -111,10 +140,29 @@ export async function send(
 ): Promise<void> {
   assertCanSend(text)
 
+  // 必须在这里同步占位：后面有 import/读配置等多个 await，
+  // 中间空档里第二次 chat:send 会再次通过校验，起两个 run。
+  const runId = ++runSeq
+  const placeholder: ActiveRun = {
+    id: runId,
+    abort: () => {},
+    release: () => {
+      if (active?.id === runId) active = null
+    }
+  }
+  active = placeholder
+
   const resumeId = getClaudeSessionId(sessionId) ?? undefined
 
-  appendMessage(sessionId, 'user', text)
-  emit({ type: 'start', sessionId })
+  // 会话可能在发送瞬间已被删除，这里失败要立刻告诉用户，而不是照常跑一轮
+  try {
+    appendMessage(sessionId, 'user', text)
+  } catch (e) {
+    placeholder.release()
+    emit({ type: 'error', sessionId, runId, message: e instanceof Error ? e.message : String(e) })
+    return
+  }
+  emit({ type: 'start', sessionId, runId })
 
   let acc = ''
   const tools: ToolCall[] = []
@@ -122,6 +170,10 @@ export async function send(
   let sawAnyEvent = false
   let timedOut = false
   let usage: Usage = { inputTokens: 0, outputTokens: 0, costUsd: 0, percentage: 0 }
+  /** 本轮占位；query 创建后才赋值，收尾时统一 release */
+  let run: ActiveRun | null = null
+  /** result 事件里带回的错误，非空表示这一轮模型侧失败 */
+  let runError: string | null = null
 
   try {
     const { query } = await import('@anthropic-ai/claude-agent-sdk')
@@ -145,28 +197,46 @@ export async function send(
         permissionMode: mode,
         includePartialMessages: true,
         pathToClaudeCodeExecutable: resolveClaudeBinary(),
-        skills: skills.length > 0 ? skills : undefined
+        skills: skillsOption(skills)
       }
     })
 
-    active = {
+    const runId = ++runSeq
+    const thisRun: ActiveRun = {
+      id: runId,
       abort: () => {
         aborted = true
         void q.interrupt().catch(() => {})
+      },
+      release: () => {
+        // 只有当前占用者才能释放，避免旧 run 的收尾把新 run 的占位抹掉
+        if (active?.id === runId) active = null
       }
     }
+    run = thisRun
+    active = thisRun
 
     const iterator = q[Symbol.asyncIterator]()
 
     while (!aborted) {
+      let timer: NodeJS.Timeout | undefined
       const next = await Promise.race([
         iterator.next(),
-        new Promise<{ done: true; value: undefined; timedOut: true }>((resolve) =>
-          setTimeout(() => resolve({ done: true, value: undefined, timedOut: true }), 30_000)
-        )
+        new Promise<{ done: true; value: undefined; timedOut: true }>((resolve) => {
+          timer = setTimeout(
+            () => resolve({ done: true, value: undefined, timedOut: true }),
+            30_000
+          )
+        })
       ])
+      // 不清理的话，一轮几百个事件会留下几百个悬挂定时器，
+      // 结束后还要拖住事件循环最多 30 秒
+      if (timer) clearTimeout(timer)
       if (next.done) {
         timedOut = 'timedOut' in next
+        // break 不会触发 async generator 的 finally，
+        // 不主动 return 的话 CLI 子进程会一直活着继续计费
+        await iterator.return?.()
         break
       }
 
@@ -185,7 +255,7 @@ export async function send(
         const delta = deltaText((message as unknown as { event: unknown }).event)
         if (delta && acc.length < MAX_OUTPUT_CHARS) {
           acc += delta
-          emit({ type: 'text', sessionId, delta })
+          emit({ type: 'text', sessionId, runId, delta })
         }
         continue
       }
@@ -221,7 +291,7 @@ export async function send(
           if (block['type'] === 'text' && typeof block['text'] === 'string') {
             if (!acc) {
               acc = block['text']
-              emit({ type: 'text', sessionId, delta: acc })
+              emit({ type: 'text', sessionId, runId, delta: acc })
             }
           } else if (block['type'] === 'tool_use') {
             const input = (block['input'] ?? {}) as Record<string, unknown>
@@ -234,7 +304,7 @@ export async function send(
             if (tools.length < MAX_TOOLS) {
               const tool: ToolCall = { name: String(block['name'] ?? ''), target: safeTarget }
               tools.push(tool)
-              emit({ type: 'tool', sessionId, tool })
+              emit({ type: 'tool', sessionId, runId, tool })
             }
           }
         }
@@ -269,7 +339,7 @@ export async function send(
                   argumentHint: '',
                   builtin: true
                 }))
-          emit({ type: 'commands', sessionId })
+          emit({ type: 'commands', sessionId, runId })
         }
         continue
       }
@@ -277,11 +347,29 @@ export async function send(
       if (message.type === 'result') {
         const r = message as unknown as {
           session_id?: string
-          usage?: { input_tokens?: number; output_tokens?: number }
+          usage?: {
+            input_tokens?: number
+            output_tokens?: number
+            cache_read_input_tokens?: number
+            cache_creation_input_tokens?: number
+          }
           total_cost_usd?: number
+          is_error?: boolean
+          subtype?: string
+          errors?: string[]
           modelUsage?: Record<string, { contextWindow?: number; inputTokens?: number }>
         }
         if (r.session_id) setClaudeSessionId(sessionId, r.session_id)
+
+        // result 也可能是失败（密钥错误、额度用尽、超过轮次上限）。
+        // 不识别的话会走成功分支，写入一条空的助手消息，用户只看到空气泡。
+        if (r.is_error) {
+          runError =
+            r.errors?.filter(Boolean).join('；') ||
+            (r.subtype === 'error_max_turns'
+              ? '已达到本轮最大轮次限制'
+              : '模型返回了错误结果')
+        }
 
         let maxTokens = 0
         let windowModel = ''
@@ -291,12 +379,19 @@ export async function send(
             windowModel = name
           }
         }
-        const used = (r.usage?.input_tokens ?? 0) + (r.usage?.output_tokens ?? 0)
+        // resume 场景下命中 prompt cache 的 token 记在 cache_read 里，
+        // input_tokens 只剩未命中的增量。只算 input+output 会让
+        // 15 万 token 的上下文显示成 0.5%，用户永远看不到该压缩了。
+        const cached =
+          (r.usage?.cache_read_input_tokens ?? 0) + (r.usage?.cache_creation_input_tokens ?? 0)
+        const inputOnly = r.usage?.input_tokens ?? 0
+        const outputOnly = r.usage?.output_tokens ?? 0
+        const used = inputOnly + cached + outputOnly
         const pct = maxTokens > 0 ? Math.min(999, Math.round((used / maxTokens) * 1000) / 10) : 0
 
         usage = {
-          inputTokens: r.usage?.input_tokens ?? 0,
-          outputTokens: r.usage?.output_tokens ?? 0,
+          inputTokens: inputOnly,
+          outputTokens: outputOnly,
           costUsd: r.total_cost_usd ?? 0,
           percentage: pct
         }
@@ -311,32 +406,63 @@ export async function send(
       }
     }
   } catch (e) {
-    active = null
-    emit({ type: 'error', sessionId, message: e instanceof Error ? e.message : String(e) })
+    run?.release()
+    emit({ type: 'error', sessionId, runId, message: e instanceof Error ? e.message : String(e) })
     return
   }
 
-  active = null
+  run?.release()
 
   // 超时或从未收到有效响应：多半是服务不可达
   if ((timedOut || !sawAnyEvent) && !aborted) {
     emit({
       type: 'error',
       sessionId,
+      runId,
       message: '连接超时，请检查网络与 ANTHROPIC_BASE_URL 配置'
     })
     return
   }
 
-  const saved = appendMessage(
-    sessionId,
-    'assistant',
-    acc || (aborted ? '（已停止）' : ''),
-    tools.length ? tools : undefined
-  )
+  // 模型侧返回错误：明确告诉用户，并且不写入空消息
+  if (runError) {
+    emit({ type: 'error', sessionId, runId, message: runError })
+    return
+  }
 
-  if (aborted) emit({ type: 'interrupted', sessionId })
-  emit({ type: 'done', sessionId, message: saved, usage })
+  // 没有任何文本且不是主动停止：说明这一轮什么也没产出，
+  // 写一条空消息只会让对话流里多出一个空气泡
+  if (!acc && !aborted) {
+    emit({
+      type: 'error',
+      sessionId,
+      runId,
+      message: '模型没有返回任何内容，请重试'
+    })
+    return
+  }
+
+  let saved: ChatMessage
+  try {
+    saved = appendMessage(
+      sessionId,
+      'assistant',
+      acc || '（已停止）',
+      tools.length ? tools : undefined
+    )
+  } catch (e) {
+    // 写到一半会话被删了：内容已在界面显示完，告诉用户没能保存
+    emit({
+      type: 'error',
+      sessionId,
+      runId,
+      message: e instanceof Error ? e.message : String(e)
+    })
+    return
+  }
+
+  if (aborted) emit({ type: 'interrupted', sessionId, runId })
+  emit({ type: 'done', sessionId, runId, message: saved, usage })
 }
 
 /**
@@ -402,7 +528,7 @@ export async function refreshContext(
         model: models['ANTHROPIC_MODEL'] || undefined,
         permissionMode: 'plan',
         pathToClaudeCodeExecutable: resolveClaudeBinary(),
-        skills: skills.length > 0 ? skills : undefined
+        skills: skillsOption(skills)
       }
     })
 
@@ -470,7 +596,20 @@ export async function refreshContext(
 export async function compact(sessionId: string, cwd: string, skills: string[]): Promise<void> {
   if (active) throw new Error('请先等待当前回复结束')
 
-  emit({ type: 'start', sessionId })
+  // 压缩同样要占位：不占的话压缩期间用户能再发消息，
+  // 两个 CLI 会同时 resume 同一个会话；而且 finally 里的清理
+  // 会把那次 send 的占位一起抹掉，导致中断失效。
+  const runId = ++runSeq
+  const placeholder: ActiveRun = {
+    id: runId,
+    abort: () => {},
+    release: () => {
+      if (active?.id === runId) active = null
+    }
+  }
+  active = placeholder
+
+  emit({ type: 'start', sessionId, runId })
   try {
     const { query } = await import('@anthropic-ai/claude-agent-sdk')
     const raw = await readRaw()
@@ -486,7 +625,7 @@ export async function compact(sessionId: string, cwd: string, skills: string[]):
         model: models['ANTHROPIC_MODEL'] || undefined,
         permissionMode: 'acceptEdits',
         pathToClaudeCodeExecutable: resolveClaudeBinary(),
-        skills: skills.length > 0 ? skills : undefined
+        skills: skillsOption(skills)
       }
     })
 
@@ -512,12 +651,13 @@ ${summary.trim()}`)
     emit({
       type: 'error',
       sessionId,
+      runId,
       message: `压缩失败：${e instanceof Error ? e.message : String(e)}`
     })
     return
   } finally {
-    active = null
+    placeholder.release()
   }
 
-  emit({ type: 'compacted', sessionId })
+  emit({ type: 'compacted', sessionId, runId })
 }

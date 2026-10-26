@@ -19,4 +19,17 @@ describe('deriveTitle', () => {
   it('空白内容给出占位标题', () => {
     expect(deriveTitle('   ')).toBe('(新会话)')
   })
+
+  it('截断不切开 emoji 代理对', () => {
+    // 39 个字符后接 emoji，第 40 个码元正好落在代理对中间
+    const title = deriveTitle('a'.repeat(39) + '😀😀😀')
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(title)).toBe(false)
+    expect(title.endsWith('…')).toBe(true)
+  })
+
+  it('全 emoji 超长时也不产生半个字符', () => {
+    const title = deriveTitle('😀'.repeat(30))
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(title)).toBe(false)
+    expect(title.length).toBeLessThanOrEqual(41)
+  })
 })
