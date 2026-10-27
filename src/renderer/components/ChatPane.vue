@@ -39,6 +39,50 @@ const ctxDetail = ref<ContextUsageDetail | null>(null)
 const ctxOpen = ref(false)
 const ctxLoading = ref(false)
 
+/* ── 滚动位置与浮动提示 ── */
+/** 用户已上翻离开底部：此时不自动跟随，并显示"回到最新"按钮 */
+const awayFromBottom = ref(false)
+/** 当前视口最上方的用户提问，用于顶部悬浮条 */
+const stickyQuestion = ref<{ id: string; text: string } | null>(null)
+
+/** 按消息 id 跳转到对应位置 */
+function scrollToMessage(id: string): void {
+  const el = thread.value?.querySelector(`[data-mid="${id}"]`)
+  if (!el) return
+  el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+}
+
+/**
+ * 滚动时更新两个状态：
+ * - 距底部超过一屏 → 视为用户在阅读历史，停止自动跟随
+ * - 取视口内最靠上的用户消息作为悬浮条内容
+ */
+function onThreadScroll(): void {
+  const el = thread.value
+  if (!el) return
+  const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+  awayFromBottom.value = distance > 120
+
+  const users = Array.from(el.querySelectorAll<HTMLElement>('.msg-user[data-mid]'))
+  const top = el.getBoundingClientRect().top
+  // 找到第一个底部越过视口顶部的用户消息
+  const current = users.find((n) => n.getBoundingClientRect().bottom > top + 8)
+  stickyQuestion.value = current
+    ? {
+        id: current.dataset.mid ?? '',
+        text: (current.querySelector('.bubble')?.textContent ?? '').trim()
+      }
+    : null
+}
+
+/** 回到最新位置 */
+function backToLatest(): void {
+  const el = thread.value
+  if (!el) return
+  awayFromBottom.value = false
+  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+}
+
 const ctxPercent = computed(() => {
   if (ctxDetail.value) return ctxDetail.value.percentage
   return current.value?.contextPercent ?? 0
@@ -276,8 +320,9 @@ function scheduleStreamRender(): void {
   const run = (): void => {
     // 流式内容不缓存（每帧都是新字符串）也不高亮（未闭合代码块会反复全量重算）
     streamHtml.value = renderMarkdown(chat.streamText, false, false)
-    // 只在真正更新 DOM 之后滚动：每 delta 都读 scrollHeight 会触发强制同步布局
-    void scrollToBottom(false)
+    // 只在用户仍停留在底部时跟随。一旦上翻阅读历史就停手，
+    // 交给"回到最新"按钮，避免看着看着被拽回底部。
+    if (!awayFromBottom.value) void scrollToBottom(false)
     streamTimer = null
     if (streamPending) {
       streamPending = false
@@ -503,7 +548,9 @@ async function send(): Promise<void> {
   }
   sessions.messages = [...sessions.messages, optimistic]
   sessions.setRunning(current.value.id, true)
-  void scrollToBottom()
+  // 用户主动发消息：恢复跟随，并滚到新消息
+  awayFromBottom.value = false
+  void scrollToBottom(false, true)
 
   const sessionId = current.value.id
   const ok = await chat.send(sessionId, prefix + text)
@@ -582,7 +629,20 @@ async function stop(): Promise<void> {
       </button>
     </div>
 
-    <div v-if="current" ref="thread" class="thread">
+    <!-- 悬浮的当前提问：只在滚动离开底部时出现，点击跳回那条消息 -->
+    <Transition name="sticky">
+      <button
+        v-if="current && awayFromBottom && stickyQuestion"
+        class="sticky-q"
+        :title="stickyQuestion.text"
+        @click="scrollToMessage(stickyQuestion.id)"
+      >
+        <span class="sq-dot" />
+        <span class="sq-text">{{ stickyQuestion.text }}</span>
+      </button>
+    </Transition>
+
+    <div v-if="current" ref="thread" class="thread" @scroll.passive="onThreadScroll">
       <div class="thread-inner">
         <!-- 新会话没有任何消息时，中间就是一片纯白，用户不知道能做什么 -->
         <div v-if="!sessions.messages.length && !chat.streaming" class="thread-empty">
@@ -644,6 +704,15 @@ async function stop(): Promise<void> {
         <span class="tip">会话数据保存在本机，与终端里的 Claude Code 互不影响</span>
       </div>
     </div>
+
+    <!-- 用户上翻阅读时出现的"回到最新"入口。
+         流式回答期间也不自动把人拽回底部，交给用户自己决定。 -->
+    <Transition name="jump">
+      <button v-if="current && awayFromBottom" class="jump-latest" @click="backToLatest">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7" /></svg>
+        <span>回到最新</span>
+      </button>
+    </Transition>
 
     <div
       v-if="current"
@@ -841,6 +910,113 @@ async function stop(): Promise<void> {
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+/* 顶部悬浮的当前提问 */
+/* 顶部悬浮的当前提问。
+   用占位布局而不是绝对定位：绝对定位会盖住正文第一行。 */
+.sticky-q {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px auto 10px;
+  max-width: min(680px, calc(100% - 48px));
+  padding: 8px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  /* 用白色卡片 + 阴影和滚动区区分开，避免看着像压在正文上 */
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t2);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.sticky-q:hover {
+  background: var(--bg-hover);
+  border-color: var(--line-3);
+}
+
+.sticky-q .sq-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+/* 最多两行，超出省略 */
+.sticky-q .sq-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.sticky-enter-active,
+.sticky-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.sticky-enter-from,
+.sticky-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* 回到最新按钮 */
+.jump-latest {
+  position: absolute;
+  bottom: 132px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 16;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 15px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+  font-size: 12px;
+  color: var(--t2);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.jump-latest:hover {
+  background: var(--bg-hover);
+  border-color: var(--line-3);
+}
+
+.jump-latest svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.jump-enter-active,
+.jump-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.jump-enter-from,
+.jump-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 6px);
 }
 
 .thread {

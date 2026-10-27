@@ -66,7 +66,7 @@ function openFile(path: string): void {
 </script>
 
 <template>
-  <div v-if="isUser" class="msg-user">
+  <div v-if="isUser" class="msg-user" :data-mid="message.id">
     <div class="bubble">{{ message.text }}</div>
     <button class="user-copy" :title="copied ? '已复制' : '复制'" @click="copyText">
       {{ copied ? '✓' : '⧉' }}
