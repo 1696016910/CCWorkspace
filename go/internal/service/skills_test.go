@@ -1,8 +1,10 @@
 package service
 
 import (
+	"claude-workbench/internal/db"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -45,6 +47,7 @@ func TestListSkills(t *testing.T) {
 }
 
 func TestToggleSkill(t *testing.T) {
+	setup(t)
 	home := withTempHome(t)
 	makeSkill(t, home, "alpha", "alpha-skill", "d")
 
@@ -56,9 +59,13 @@ func TestToggleSkill(t *testing.T) {
 		t.Error("禁用后 Enabled 应为 false")
 	}
 
-	// 禁用名单要落盘
-	if _, err := os.Stat(filepath.Join(home, ".claude", "disabled-skills.json")); err != nil {
-		t.Error("禁用名单未写入文件")
+	// 禁用名单要落到数据库 meta 表，和 Node 版同一个位置
+	var stored string
+	if err := db.Get().QueryRow(`SELECT value FROM meta WHERE key = 'disabled_skills'`).Scan(&stored); err != nil {
+		t.Fatalf("禁用名单未写入数据库: %v", err)
+	}
+	if !strings.Contains(stored, "alpha-skill") {
+		t.Errorf("名单内容不含 alpha-skill: %q", stored)
 	}
 
 	if err := ToggleSkill("alpha-skill", true); err != nil {

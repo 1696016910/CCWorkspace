@@ -8,15 +8,13 @@ use std::process::{Command, Stdio};
 
 pub const MAX_OUTPUT_CHARS: usize = 400_000;
 pub const MAX_TOOLS: usize = 500;
-const IDLE_TIMEOUT_SECS: u64 = 30;
 
 #[derive(Debug, Clone)]
 pub enum Event {
     Text(String),
     Tool(String, String),
     ClaudeSession(String),
-    Commands(Vec<String>),
-    Context { model: String, total: i64, max: i64, percent: f64 },
+    Context { total: i64, max: i64, percent: f64 },
     Error(String),
 }
 
@@ -26,7 +24,6 @@ pub struct Options {
     pub model: String,
     pub resume: String,
     pub mode: String,
-    pub skills: Vec<String>,
     pub env: Vec<(String, String)>,
 }
 
@@ -124,7 +121,6 @@ struct State {
     tools: usize,
     run_err: String,
     // 空闲超时用：记录最后一条有效事件的时间
-    last_activity: Option<std::time::Instant>,
 }
 
 impl State {
@@ -145,15 +141,6 @@ impl State {
             "system" if sub == "init" => {
                 if let Some(sid) = msg.get("session_id").and_then(Value::as_str) {
                     emit(Event::ClaudeSession(sid.to_string()));
-                }
-                if let Some(arr) = msg.get("slash_commands").and_then(Value::as_array) {
-                    let names: Vec<String> = arr
-                        .iter()
-                        .filter_map(|v| v.as_str().map(str::to_string))
-                        .collect();
-                    if !names.is_empty() {
-                        emit(Event::Commands(names));
-                    }
                 }
             }
             "stream_event" => {
@@ -242,19 +229,15 @@ impl State {
 
         // 分母取 modelUsage 里 contextWindow 最大的那条
         let mut max_tokens = 0i64;
-        let mut model = String::new();
         if let Some(mu) = msg.get("modelUsage").and_then(Value::as_object) {
-            for (name, info) in mu {
+            for info in mu.values() {
                 let cw = info.get("contextWindow").and_then(Value::as_i64).unwrap_or(0);
-                if cw > max_tokens {
-                    max_tokens = cw;
-                    model = name.clone();
-                }
+                max_tokens = max_tokens.max(cw);
             }
         }
         if max_tokens > 0 {
             let pct = (used as f64 / max_tokens as f64 * 1000.0).round() / 10.0;
-            emit(Event::Context { model, total: used, max: max_tokens, percent: pct });
+            emit(Event::Context { total: used, max: max_tokens, percent: pct });
         }
     }
 
@@ -266,7 +249,6 @@ impl State {
         if self.acc.is_empty() && self.tools == 0 {
             emit(Event::Error("模型没有返回任何内容，请重试".into()));
         }
-        let _ = IDLE_TIMEOUT_SECS; // 空闲超时用进程级 kill 实现，见 app 层
     }
 }
 
@@ -402,7 +384,6 @@ mod real_tests {
                 model: String::new(),
                 resume: String::new(),
                 mode: "acceptEdits".into(),
-                skills: vec![],
                 env: vec![],
             },
             |e| match e {

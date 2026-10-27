@@ -29,6 +29,7 @@ func Run() {
 	}
 	defer db.Close()
 
+	ui.SetVersion(Version)
 	w := ui.NewMainWindow(bridge{}, chatOnce)
 	w.Run()
 }
@@ -89,6 +90,26 @@ func (bridge) DuplicateSession(id string) (model.SessionSummary, error) {
 	return service.DuplicateSession(id)
 }
 
+func (bridge) DeletedSessions() []model.SessionSummary {
+	list, err := service.ListDeletedSessions()
+	if err != nil {
+		log.Printf("加载回收站失败: %v", err)
+		return nil
+	}
+	return list
+}
+
+func (bridge) RestoreSession(id string) error { return service.RestoreSession(id) }
+func (bridge) PurgeSession(id string) error   { return service.PurgeSession(id) }
+
+// ReadFile 读取工作区内的文本文件用于预览。
+//
+// 预览入口来自模型输出，属于不可信内容：必须限制在工作区内，
+// 否则一个指向 ~/.ssh/id_rsa 的链接点一下就把私钥显示出来了。
+func (bridge) ReadFile(workspacePath, relPath string) (string, error) {
+	return service.ReadWorkspaceFile(workspacePath, relPath)
+}
+
 func (bridge) Summary() string {
 	p, err := db.Path()
 	if err != nil {
@@ -147,7 +168,6 @@ func chatOnce(sessionID, text string, onDelta func(string), onDone func(string, 
 		Model:  service.ReadModels()["ANTHROPIC_MODEL"],
 		Resume: mustClaudeSID(sessionID),
 		Mode:   service.ReadPermissions().DefaultMode,
-		Skills: service.EnabledSkillNames(),
 		Env:    envMap(),
 	}
 

@@ -73,8 +73,6 @@ type Options struct {
 	Resume string
 	// Mode 权限模式，空则用 acceptEdits
 	Mode string
-	// Skills 启用的 Skill 名单
-	Skills []string
 	// Env 追加的环境变量（来自 settings.json 的 env）
 	Env map[string]string
 }

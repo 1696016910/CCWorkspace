@@ -22,6 +22,14 @@ type API interface {
 	PinSession(id string, pinned bool) error
 	DuplicateSession(id string) (model.SessionSummary, error)
 
+	// 回收站
+	DeletedSessions() []model.SessionSummary
+	RestoreSession(id string) error
+	PurgeSession(id string) error
+
+	// 文件预览：读取工作区内的文本文件
+	ReadFile(workspacePath, relPath string) (string, error)
+
 	Summary() string
 }
 

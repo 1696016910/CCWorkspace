@@ -47,6 +47,9 @@ type MainWindow struct {
 	api  API
 	chat ChatFn
 
+	// 主界面根容器，设置页打开时暂存以便返回
+	root fyne.CanvasObject
+
 	// 待确认的删除："session" 或 "workspace"
 	pendingKind string
 	pendingID   string
@@ -152,11 +155,54 @@ func (m *MainWindow) build() {
 		}
 	})
 
+	// 四个会话操作收进一个「更多」菜单：纵向堆叠会挤掉会话列表的可见行数。
+	var moreSesBtn *widget.Button
+	moreSesBtn = widget.NewButtonWithIcon("更多", theme.MoreHorizontalIcon(), func() {
+		s := m.findSession(m.currentSes)
+		if s == nil {
+			m.setStatus("请先选择一个会话")
+			return
+		}
+		pinLabel := "置顶"
+		if s.PinnedAt != nil {
+			pinLabel = "取消置顶"
+		}
+		menu := fyne.NewMenu("",
+			fyne.NewMenuItem("重命名", func() { m.promptRenameSession(s.ID, s.Title) }),
+			fyne.NewMenuItem(pinLabel, func() {
+				if err := m.api.PinSession(s.ID, s.PinnedAt == nil); err != nil {
+					m.setStatus(err.Error())
+					return
+				}
+				m.refreshSessions()
+				m.setStatus("已更新置顶")
+			}),
+			fyne.NewMenuItem("复制会话", func() {
+				if _, err := m.api.DuplicateSession(s.ID); err != nil {
+					m.setStatus(err.Error())
+					return
+				}
+				m.refreshSessions()
+				m.setStatus("已复制会话")
+			}),
+			fyne.NewMenuItemSeparator(),
+			fyne.NewMenuItem("删除会话", func() {
+				title := s.Title
+				if title == "" {
+					title = "(新会话)"
+				}
+				m.askDelete("session", s.ID, title)
+			}),
+		)
+		widget.ShowPopUpMenuAtPosition(menu, m.win.Canvas(), fyne.CurrentApp().Driver().AbsolutePositionForObject(moreSesBtn))
+	})
+
 	wsPane := container.NewBorder(
 		container.NewVBox(newWsBtn, delWsBtn, widget.NewLabel("工作区")),
 		nil, nil, nil, wsList)
 	sessPane := container.NewBorder(
-		container.NewVBox(newSessBtn, delSesBtn, widget.NewLabel("会话")),
+		container.NewVBox(container.NewBorder(nil, nil, nil,
+			container.NewHBox(moreSesBtn, delSesBtn), newSessBtn), widget.NewLabel("会话")),
 		nil, nil, nil, sessList)
 
 	// 上下两半，各自带滚动；固定最小宽度避免被右侧对话区挤压
@@ -180,29 +226,39 @@ func (m *MainWindow) build() {
 
 	m.statusLabel = widget.NewLabel("就绪")
 
+	contextBtn := widget.NewButtonWithIcon("上下文", theme.InfoIcon(), m.showContext)
+	trashBtn := widget.NewButtonWithIcon("回收站", theme.DeleteIcon(), m.ShowTrash)
+
 	composer := container.NewBorder(
 		nil,
-		container.NewHBox(m.sendBtn, m.stopBtn, m.statusLabel),
+		container.NewHBox(m.sendBtn, m.stopBtn, contextBtn, trashBtn, m.statusLabel),
 		nil, nil,
 		m.input,
 	)
 
 	head := widget.NewLabel("Claude 工作台 · Go 版")
 	head.TextStyle = fyne.TextStyle{Bold: true}
+	settingsBtn := widget.NewButtonWithIcon("设置", theme.SettingsIcon(), func() {
+		m.ShowSettings()
+	})
 
 	right := container.NewBorder(
-		head, composer, nil, nil,
+		container.NewBorder(nil, nil, nil, settingsBtn, head), composer, nil, nil,
 		m.chatScroll,
 	)
 
 	split := container.NewHSplit(sidebarBox, right)
 	split.SetOffset(0.22)
 
+	m.root = split
 	m.win.SetContent(split)
 
 	m.refreshSessions()
 	m.appendSystem("已就绪。数据库：" + m.api.Summary())
 }
+
+// mainContent 返回主界面，供从设置页返回时恢复。
+func (m *MainWindow) mainContent() fyne.CanvasObject { return m.root }
 
 // refreshNames 重建左侧显示文本。
 func (m *MainWindow) refreshNames() {
@@ -272,6 +328,11 @@ func (m *MainWindow) appendMessage(msg model.ChatMessage) {
 
 	if len(msg.Tools) > 0 {
 		m.chatBox.Add(widget.NewLabel(m.toolSummary(msg.Tools)))
+		for _, t := range msg.Tools {
+			if looksLikePath(t.Target) {
+				m.chatBox.Add(m.fileChip(t.Target))
+			}
+		}
 	}
 	m.chatBox.Refresh()
 }
@@ -319,6 +380,25 @@ func (m *MainWindow) promptNewWorkspace() {
 		m.workspaces = list
 		m.refreshNames()
 	}, m.win)
+}
+
+// promptRenameSession 弹窗重命名会话。
+func (m *MainWindow) promptRenameSession(id, title string) {
+	entry := widget.NewEntry()
+	entry.SetText(title)
+	dialog.ShowForm("重命名会话", "保存", "取消",
+		[]*widget.FormItem{widget.NewFormItem("标题", entry)},
+		func(ok bool) {
+			if !ok {
+				return
+			}
+			if err := m.api.RenameSession(id, entry.Text); err != nil {
+				dialog.ShowError(err, m.win)
+				return
+			}
+			m.refreshSessions()
+			m.setStatus("已重命名")
+		}, m.win)
 }
 
 // setStatus 更新状态栏，供回调里使用。

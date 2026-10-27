@@ -1,6 +1,7 @@
 package service
 
 import (
+	"claude-workbench/internal/db"
 	"claude-workbench/internal/model"
 	"encoding/json"
 	"fmt"
@@ -53,10 +54,13 @@ func ListSkills() ([]model.SkillInfo, error) {
 }
 
 // ToggleSkill 启用/禁用一个 Skill。
+//
+// 名单存在数据库 meta.disabled_skills，和 Node 版同一个位置：
+// 三份实现共用一个库，存文件里会导致各版本互相看不到对方的开关。
 func ToggleSkill(name string, enabled bool) error {
-	dir, err := ClaudeDir()
-	if err != nil {
-		return err
+	conn := db.Get()
+	if conn == nil {
+		return fmt.Errorf("数据库未打开")
 	}
 	set := disabledSkillSet()
 	if enabled {
@@ -70,37 +74,31 @@ func ToggleSkill(name string, enabled bool) error {
 	}
 	sort.Strings(list)
 
-	body, _ := json.MarshalIndent(list, "", "  ")
-	return os.WriteFile(filepath.Join(dir, "disabled-skills.json"), body, 0o600)
+	body, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	_, err = conn.Exec(
+		`INSERT INTO meta(key, value) VALUES('disabled_skills', ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, string(body))
+	return err
 }
 
 // disabledSkillSet 读取禁用名单。
 func disabledSkillSet() map[string]bool {
 	out := map[string]bool{}
-	dir, err := ClaudeDir()
-	if err != nil {
+	conn := db.Get()
+	if conn == nil {
 		return out
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "disabled-skills.json"))
-	if err != nil {
+	var raw string
+	if err := conn.QueryRow(`SELECT value FROM meta WHERE key = 'disabled_skills'`).Scan(&raw); err != nil {
 		return out
 	}
 	var list []string
-	if json.Unmarshal(raw, &list) == nil {
+	if json.Unmarshal([]byte(raw), &list) == nil {
 		for _, n := range list {
 			out[n] = true
-		}
-	}
-	return out
-}
-
-// EnabledSkillNames 供会话启动时使用。
-func EnabledSkillNames() []string {
-	all, _ := ListSkills()
-	out := make([]string, 0, len(all))
-	for _, s := range all {
-		if s.Enabled {
-			out = append(out, s.Name)
 		}
 	}
 	return out
