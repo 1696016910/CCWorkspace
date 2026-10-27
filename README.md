@@ -50,6 +50,33 @@ npm run dist:linux  # Linux
 产物统一命名为 `ClaudeWorkbench-<版本>-<架构>.<扩展名>`。必须是 ASCII：
 中文名会被百分号编码进 `latest.yml` 的下载地址，多数更新代理会直接返回 400。
 
+#### 打包报 EBUSY 怎么办
+
+```
+⨯ EBUSY: resource busy or locked, unlink '.../win-unpacked/resources/app.asar'
+```
+
+这是 `release/` 里的文件被别的程序持有句柄，不是构建配置的问题。
+最常见的是**编辑器**：用 VS Code 打开着这个项目时，它的文件监视器会抓住
+`release/` 内的文件（实测可复现）。
+
+先查是谁：
+
+```bash
+npm run check:lock
+```
+
+它会用 Windows Restart Manager 查出真正持锁的进程并打印出来。然后二选一：
+
+- 关掉编辑器对该目录的监视（或在 VS Code 里排除 `release/**`）
+- 换目录构建，不动旧产物：
+
+```bash
+npx electron-builder --win -c.directories.output=release-tmp
+```
+
+`npm run dist:safe` 会先做占用检查再打包，适合在容易撞锁的环境里用。
+
 ---
 
 ## 发版与自动更新

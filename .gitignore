@@ -26,6 +26,5 @@ settings.local.json
 # 配置备份（可能含令牌）
 backups/
 
-# 备用构建输出目录（钉钉同步盘会锁住 release/）
-release-final/
-release2/
+# 打包绕路目录（release/ 被编辑器等程序占用时使用）
+dist-final/

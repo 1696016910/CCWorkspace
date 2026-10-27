@@ -19,7 +19,9 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
     "dist": "npm run build && electron-builder --win",
     "dist:mac": "npm run build && electron-builder --mac",
-    "dist:linux": "npm run build && electron-builder --linux"
+    "dist:linux": "npm run build && electron-builder --linux",
+    "check:lock": "node scripts/check-build-lock.mjs",
+    "dist:safe": "npm run check:lock && npm run build && electron-builder --win"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.309",
