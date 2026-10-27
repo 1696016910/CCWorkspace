@@ -66,16 +66,20 @@ npm run dist:linux  # Linux
 npm run check:lock
 ```
 
-它会用 Windows Restart Manager 查出真正持锁的进程并打印出来。然后二选一：
+它会用 Windows Restart Manager 查出真正持锁的进程并打印出来。
 
-- 关掉编辑器对该目录的监视（或在 VS Code 里排除 `release/**`）
-- 换目录构建，不动旧产物：
+根因通常是编辑器在监视构建产物目录。仓库已带 `.vscode/settings.json`，
+把 `release/**`、`out/**` 从文件监视与搜索中排除；若 VS Code 在执行
+`npm run dist` 之前就已打开，需要重载窗口（Ctrl+Shift+P → Reload Window）
+让配置生效。
+
+实在放不开时换目录构建，不动旧产物：
 
 ```bash
-npx electron-builder --win -c.directories.output=release-tmp
+npx electron-builder --win -c.directories.output=dist
 ```
 
-`npm run dist:safe` 会先做占用检查再打包，适合在容易撞锁的环境里用。
+`npm run dist:safe` 会先做占用检查再打包。
 
 ---
 

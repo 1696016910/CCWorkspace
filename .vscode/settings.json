@@ -1,0 +1,14 @@
+{
+  "// 说明": "构建产物目录会被 electron-builder 整体删除重建。编辑器监视这些目录会持有文件句柄，导致打包报 EBUSY: resource busy or locked。",
+  "files.watcherExclude": {
+    "**/release/**": true,
+    "**/dist-final/**": true,
+    "**/out/**": true,
+    "**/node_modules/**": true
+  },
+  "search.exclude": {
+    "**/release/**": true,
+    "**/dist-final/**": true,
+    "**/out/**": true
+  }
+}
