@@ -138,16 +138,17 @@ textarea {
   left: 16px;
 }
 .st-h1x {
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 600;
-  margin-bottom: 5px;
+  letter-spacing: -0.2px;
+  margin-bottom: 6px;
 }
 
 .st-subx {
   font-size: 12.5px;
   color: var(--t3);
-  line-height: 1.6;
-  margin-bottom: 20px;
+  line-height: 1.65;
+  margin-bottom: 24px;
 }
 
 .st-blockx {
@@ -163,16 +164,16 @@ textarea {
 
 .st-cardx {
   border: 1px solid var(--line-2);
-  border-radius: 8px;
-  background: #fff;
+  border-radius: 10px;
+  background: var(--surface);
   overflow: hidden;
 }
 
 .st-rowx {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 13px 15px;
+  gap: 16px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -181,7 +182,7 @@ textarea {
 }
 
 .st-rowx:hover {
-  background: #fcfcfd;
+  background: var(--surface-2);
 }
 
 .st-l {
@@ -239,8 +240,8 @@ textarea {
 }
 
 .st-btn {
-  height: 27px;
-  padding: 0 11px;
+  height: 32px;
+  padding: 0 14px;
   border-radius: var(--r);
   border: 1px solid var(--line-3);
   background: #fcfcfc;

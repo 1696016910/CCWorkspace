@@ -5,7 +5,7 @@
  * 迁移只增不改——已发布的版本不再修改，避免用户库结构漂移。
  */
 
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 export const MIGRATIONS: Record<number, string> = {
   1: `
@@ -56,5 +56,14 @@ export const MIGRATIONS: Record<number, string> = {
     ALTER TABLE sessions ADD COLUMN context_tokens INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE sessions ADD COLUMN context_max INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE sessions ADD COLUMN context_percent REAL NOT NULL DEFAULT 0;
+  `,
+
+  /**
+   * 置顶：值为置顶时间，NULL 表示未置顶。
+   * 排序时置顶项优先，未置顶按原有顺序。
+   */
+  3: `
+    ALTER TABLE workspaces ADD COLUMN pinned_at TEXT;
+    ALTER TABLE sessions ADD COLUMN pinned_at TEXT;
   `
 }

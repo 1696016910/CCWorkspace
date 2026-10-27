@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useToast } from '@/composables/useToast'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSessionStore } from '@/stores/session'
 import { useChatStore } from '@/stores/chat'
+import ConfirmDialog from './ConfirmDialog.vue'
+import NewWorkspaceDialog from './NewWorkspaceDialog.vue'
 import type { SessionSummary } from '@shared/types'
 
 const emit = defineEmits<{ 'open-settings': []; 'open-trash': [] }>()
@@ -13,25 +15,61 @@ const sessions = useSessionStore()
 const chat = useChatStore()
 const toast = useToast()
 
-/**
- * 删除会话前先停掉它的生成。
- * 不停的话请求会继续跑并计费，产出的回复又因为会话已软删而被丢弃，
- * 等于白花钱；同时侧栏绿点会一直亮着。
- */
-async function removeSession(id: string): Promise<void> {
-  if (sessions.isRunning(id)) await chat.stop()
-  await sessions.remove(id)
+/* ── 弹窗状态 ── */
+const showNewWs = ref(false)
+/** 待确认的删除动作：只有点了确认才真正执行 */
+const pending = ref<
+  | { kind: 'session'; id: string; title: string }
+  | { kind: 'workspace'; id: string; name: string; sessionCount: number; deletedCount: number }
+  | null
+>(null)
+
+/* ── 下拉菜单（挂在 body 上，避免被 overflow 裁掉） ── */
+type MenuItem = {
+  label: string
+  icon: string
+  danger?: boolean
+  action: () => void | Promise<void>
+}
+const menu = ref<{ x: number; y: number; items: MenuItem[] } | null>(null)
+
+function openMenu(e: MouseEvent, items: MenuItem[]): void {
+  e.stopPropagation()
+  e.preventDefault()
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  menu.value = { x: rect.right, y: rect.bottom + 4, items }
+}
+
+function closeMenu(): void {
+  menu.value = null
+}
+
+async function runMenu(item: MenuItem): Promise<void> {
+  closeMenu()
+  await item.action()
 }
 
 onMounted(async () => {
   theme.value = await window.api.theme.get()
   document.documentElement.dataset.theme = theme.value
+  window.addEventListener('click', closeMenu)
+  window.addEventListener('keydown', onGlobalKey)
 })
+
+onUnmounted(() => {
+  window.removeEventListener('click', closeMenu)
+  window.removeEventListener('keydown', onGlobalKey)
+})
+
+function onGlobalKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && menu.value) closeMenu()
+}
 
 interface Group {
   workspaceId: string
   name: string
   path: string
+  pinned: boolean
   sessions: SessionSummary[]
 }
 
@@ -40,46 +78,78 @@ const groups = computed<Group[]>(() =>
     workspaceId: w.id,
     name: w.name,
     path: w.path,
+    pinned: w.pinnedAt !== null,
     sessions: sessions.sessionsOf(w.id)
   }))
 )
 
-const hasWorkspace = computed(() => ws.list.length > 0)
-
-async function newChat(): Promise<void> {
-  if (!hasWorkspace.value) {
-    await ws.pickAndAdd()
-    return
-  }
-  await sessions.create(ws.current?.id ?? null)
-}
-
-/** 在工作区名称右侧直接新建会话（Qoder 式） */
+/* ── 新建会话 ── */
 async function newChatIn(workspaceId: string): Promise<void> {
   const created = await sessions.create(workspaceId)
   if (created) toast.success('已新建会话')
 }
 
-/* ── 主题切换 ── */
-const theme = ref<'light' | 'dark'>('light')
-
-async function toggleTheme(): Promise<void> {
-  theme.value = theme.value === 'light' ? 'dark' : 'light'
-  document.documentElement.dataset.theme = theme.value
-  await window.api.theme.set(theme.value)
+/* ── 删除会话 / 工作区（先弹确认） ── */
+function askRemoveSession(s: SessionSummary): void {
+  pending.value = { kind: 'session', id: s.id, title: displayTitle(sessions.list, s) }
 }
 
-/* ── 工作区重命名 ── */
+async function confirmPending(): Promise<void> {
+  const p = pending.value
+  pending.value = null
+  if (!p) return
+
+  if (p.kind === 'session') {
+    if (sessions.isRunning(p.id)) await chat.stop()
+    await sessions.remove(p.id)
+    toast.info?.('已删除 1 个会话')
+  } else {
+    await ws.removeConfirmed(p.id)
+    toast.info?.('已删除 1 个工作区')
+  }
+}
+
+function askRemoveWorkspace(g: Group): void {
+  const deleted = deletedCountOf(g.workspaceId)
+  pending.value = {
+    kind: 'workspace',
+    id: g.workspaceId,
+    name: g.name,
+    sessionCount: g.sessions.length,
+    deletedCount: deleted
+  }
+}
+
+/** 回收站里属于该工作区的会话数（也会被级联删除） */
+const deletedByWorkspace = ref<Record<string, number>>({})
+
+function deletedCountOf(workspaceId: string): number {
+  return deletedByWorkspace.value[workspaceId] ?? 0
+}
+
+async function loadDeletedCounts(): Promise<void> {
+  try {
+    const list = await window.api.session.listDeleted()
+    const map: Record<string, number> = {}
+    for (const s of list) map[s.workspaceId] = (map[s.workspaceId] ?? 0) + 1
+    deletedByWorkspace.value = map
+  } catch {
+    // 回收站读取失败不影响主流程
+  }
+}
+
+/* ── 重命名 ── */
 const renamingWsId = ref<string | null>(null)
 const wsRenameDraft = ref('')
+const renamingId = ref<string | null>(null)
+const renameDraft = ref('')
+const renameInput = ref<HTMLInputElement | null>(null)
 
 function startWsRename(id: string, name: string): void {
   renamingWsId.value = id
   wsRenameDraft.value = name
   void nextTick(() => {
-    const el = document.querySelector<HTMLInputElement>('.ws-rename')
-    el?.focus()
-    el?.select()
+    document.querySelector<HTMLInputElement>('.ws-rename')?.select()
   })
 }
 
@@ -92,11 +162,6 @@ async function commitWsRename(id: string): Promise<void> {
     toast.success('工作区已重命名')
   }
 }
-
-/* ── 重命名：Electron 不支持 window.prompt，改用内联输入 ── */
-const renamingId = ref<string | null>(null)
-const renameDraft = ref('')
-const renameInput = ref<HTMLInputElement | null>(null)
 
 function startRename(e: Event, id: string, currentTitle: string): void {
   e.preventDefault()
@@ -120,8 +185,103 @@ async function commitRename(): Promise<void> {
   toast.success('已重命名')
 }
 
-function cancelRename(): void {
-  renamingId.value = null
+/* ── 详情 ── */
+const detail = ref<{ title: string; rows: [string, string][] } | null>(null)
+
+function showWorkspaceDetail(g: Group): void {
+  const w = ws.list.find((x) => x.id === g.workspaceId)
+  if (!w) return
+  detail.value = {
+    title: `工作区 · ${w.name}`,
+    rows: [
+      ['路径', w.path],
+      ['会话数', `${g.sessions.length} 个`],
+      ['回收站', `${deletedCountOf(g.workspaceId)} 个`],
+      ['添加时间', formatDate(w.addedAt)]
+    ]
+  }
+}
+
+function showSessionDetail(s: SessionSummary): void {
+  detail.value = {
+    title: `会话 · ${displayTitle(sessions.list, s)}`,
+    rows: [
+      ['消息数', `${s.messageCount} 条`],
+      ['上下文', `${Math.round(s.contextPercent)}%`],
+      ['更新时间', formatDate(s.updatedAt)],
+      ['置顶', s.pinnedAt ? '是' : '否']
+    ]
+  }
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso)
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/* ── 菜单构造 ── */
+function workspaceMenu(g: Group): MenuItem[] {
+  return [
+    {
+      label: '重命名',
+      icon: 'edit',
+      action: () => startWsRename(g.workspaceId, g.name)
+    },
+    { label: '详情', icon: 'info', action: () => showWorkspaceDetail(g) },
+    {
+      label: g.pinned ? '取消置顶' : '置顶',
+      icon: 'pin',
+      action: () => ws.pin(g.workspaceId, !g.pinned)
+    },
+    {
+      label: '删除工作区',
+      icon: 'trash',
+      danger: true,
+      action: () => askRemoveWorkspace(g)
+    }
+  ]
+}
+
+function sessionMenu(s: SessionSummary): MenuItem[] {
+  const title = displayTitle(sessions.list, s)
+  const pinned = s.pinnedAt !== null
+  return [
+    {
+      label: '重命名',
+      icon: 'edit',
+      action: () => startRename(new MouseEvent('click'), s.id, s.title)
+    },
+    {
+      label: pinned ? '取消置顶' : '置顶',
+      icon: 'pin',
+      action: () => sessions.pin(s.id, !pinned)
+    },
+    {
+      label: '复制会话',
+      icon: 'copy',
+      action: async () => {
+        await sessions.duplicate(s.id)
+        toast.success('已复制会话')
+      }
+    },
+    { label: '详情', icon: 'info', action: () => showSessionDetail(s) },
+    {
+      label: `删除「${title}」`,
+      icon: 'trash',
+      danger: true,
+      action: () => askRemoveSession(s)
+    }
+  ]
+}
+
+/* ── 主题 ── */
+const theme = ref<'light' | 'dark'>('light')
+
+async function toggleTheme(): Promise<void> {
+  theme.value = theme.value === 'light' ? 'dark' : 'light'
+  document.documentElement.dataset.theme = theme.value
+  await window.api.theme.set(theme.value)
 }
 
 /** 未命名的会话按时间顺序编号，避免列表里出现多个同名条目 */
@@ -131,15 +291,6 @@ function displayTitle(list: SessionSummary[], s: SessionSummary): string {
   if (unnamed.length <= 1) return s.title
   const idx = unnamed.findIndex((x) => x.id === s.id)
   return `新会话 ${idx + 1}`
-}
-
-/** 只保留路径的最后两级，避免侧栏被长路径撑破 */
-function shortPath(full: string): string {
-  const parts = full.split(/[\/]/).filter(Boolean)
-  if (parts.length <= 2) return full
-  const tail = parts.slice(-2).join('/')
-  const isWin = /^[A-Za-z]:/.test(full)
-  return `${isWin ? parts[0] + ':/' : '/'}…/${tail}`
 }
 
 function relativeTime(iso: string): string {
@@ -152,66 +303,68 @@ function relativeTime(iso: string): string {
   const day = Math.floor(hour / 24)
   return `${day} 天前`
 }
+
+/* ── 图标路径 ── */
+const ICONS: Record<string, string> = {
+  edit: 'M4 20h4l10-10-4-4L4 16v4zM13.5 6.5l4 4',
+  info: 'M12 11v5M12 8v.01',
+  pin: 'M12 19V5M5 12l7-7 7 7',
+  copy: 'M8 8h11v11H8zM15 5.5H6A1.5 1.5 0 004.5 7v9',
+  trash: 'M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13'
+}
 </script>
 
 <template>
   <aside class="sidebar">
-    <button class="new-chat" @click="newChat">
-      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
-      {{ hasWorkspace ? '新建会话' : '添加工作区' }}
-    </button>
+    <!-- 顶部：新建工作区 -->
+    <div class="side-top">
+      <button class="btn-new-ws" @click="showNewWs = true">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+        新建工作区
+      </button>
+    </div>
 
-    <div class="side-scroll">
-      <div class="grp-label">
-        <span>工作区</span>
-        <span class="sp" />
-        <button class="mini-add" title="添加工作区" @click="ws.pickAndAdd()">＋</button>
-      </div>
-
+    <!-- 工作区与会话 -->
+    <div class="side-list">
       <div v-for="g in groups" :key="g.workspaceId" class="ws">
         <div
           class="ws-head"
           role="button"
           tabindex="0"
+          :title="g.path"
           @click="ws.toggle(g.workspaceId)"
           @keydown.enter.prevent="ws.toggle(g.workspaceId)"
           @keydown.space.prevent="ws.toggle(g.workspaceId)"
         >
-          <span class="tri" :class="{ closed: ws.isCollapsed(g.workspaceId) }">▼</span>
-          <span class="fico">
+          <span class="ws-tri" :class="{ closed: ws.isCollapsed(g.workspaceId) }">
+            <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
+          </span>
+          <span class="ws-ico">
             <svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z" /></svg>
           </span>
-          <span class="wtext">
-            <input
-              v-if="renamingWsId === g.workspaceId"
-              ref="wsRenameInput"
-              v-model="wsRenameDraft"
-              class="ws-rename"
-              @click.stop
-              @keydown.enter.prevent="commitWsRename(g.workspaceId)"
-              @keydown.esc.prevent="renamingWsId = null"
-              @blur="commitWsRename(g.workspaceId)"
-            />
-            <template v-else>
-              <span class="wname">{{ g.name }}</span>
-              <span class="wpath" :title="g.path">{{ shortPath(g.path) }}</span>
-            </template>
+          <input
+            v-if="renamingWsId === g.workspaceId"
+            v-model="wsRenameDraft"
+            class="ws-rename"
+            @click.stop
+            @keydown.enter.prevent="commitWsRename(g.workspaceId)"
+            @keydown.esc.prevent="renamingWsId = null"
+            @blur="commitWsRename(g.workspaceId)"
+          />
+          <span v-else class="ws-name">
+            <span v-if="g.pinned" class="pin-dot" title="已置顶">•</span>{{ g.name }}
           </span>
-          <span class="wcnt">{{ g.sessions.length }}</span>
-          <span class="ws-actions">
-            <button
-              class="ws-add"
-              title="重命名工作区"
-              @click.stop="startWsRename(g.workspaceId, g.name)"
-            >
-              ✎
+          <span class="ws-count">{{ g.sessions.length }}</span>
+          <span class="ws-btns">
+            <button class="row-btn add" title="新建会话" @click.stop="newChatIn(g.workspaceId)">
+              <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
             </button>
-            <button
-              class="ws-add"
-              title="在此工作区新建会话"
-              @click.stop="newChatIn(g.workspaceId)"
-            >
-              ＋
+            <button class="row-btn more" title="更多" @click.stop="openMenu($event, workspaceMenu(g))">
+              <svg viewBox="0 0 24 24">
+                <circle cx="12" cy="5" r="1.8" />
+                <circle cx="12" cy="12" r="1.8" />
+                <circle cx="12" cy="19" r="1.8" />
+              </svg>
             </button>
           </span>
         </div>
@@ -220,7 +373,7 @@ function relativeTime(iso: string): string {
           <div
             v-for="s in g.sessions"
             :key="s.id"
-            class="chat"
+            class="chat-item"
             :class="{ on: sessions.currentId === s.id }"
             role="button"
             tabindex="0"
@@ -236,41 +389,36 @@ function relativeTime(iso: string): string {
               class="rename-input"
               @click.stop
               @keydown.enter.prevent="commitRename"
-              @keydown.esc.prevent="cancelRename"
+              @keydown.esc.prevent="renamingId = null"
               @blur="commitRename"
             />
             <template v-else>
-              <span class="cn">{{ displayTitle(g.sessions, s) }}</span>
-              <span class="ctime">{{ relativeTime(s.updatedAt) }}</span>
-              <span class="chat-actions">
-                <button
-                  class="edit-btn"
-                  title="重命名"
-                  @click.stop="startRename($event, s.id, s.title)"
-                >
-                  ✎
-                </button>
-                <button
-                  class="edit-btn"
-                  title="删除会话"
-                  @click.stop="removeSession(s.id)"
-                >
-                  ✕
-                </button>
+              <span class="chat-title">
+                <span v-if="s.pinnedAt" class="pin-dot" title="已置顶">•</span>{{
+                  displayTitle(g.sessions, s)
+                }}
               </span>
-              <span class="cd" :class="sessions.isRunning(s.id) ? 'live' : 'idle'" />
+              <span class="chat-time">{{ relativeTime(s.updatedAt) }}</span>
+              <button class="row-btn more" title="更多" @click.stop="openMenu($event, sessionMenu(s))">
+                <svg viewBox="0 0 24 24">
+                  <circle cx="12" cy="5" r="1.8" />
+                  <circle cx="12" cy="12" r="1.8" />
+                  <circle cx="12" cy="19" r="1.8" />
+                </svg>
+              </button>
+              <span class="chat-dot" :class="sessions.isRunning(s.id) ? 'live' : 'idle'" />
             </template>
           </div>
-          <p v-if="g.sessions.length === 0" class="ws-empty">暂无会话</p>
+          <p v-if="g.sessions.length === 0" class="ws-empty">暂无会话，点上方 ＋ 新建</p>
         </div>
       </div>
 
       <p v-if="groups.length === 0 && !ws.loading" class="side-empty">
-        还没有工作区。点击「添加工作区」选择一个项目目录。
+        还没有工作区。点上方「新建工作区」选择一个项目目录。
       </p>
-      <p v-if="ws.error" class="side-error">{{ ws.error }}</p>
     </div>
 
+    <!-- 底部：主题 / 回收站 / 设置 -->
     <div class="side-foot">
       <button class="foot-btn" @click="toggleTheme">
         <svg v-if="theme === 'light'" viewBox="0 0 24 24">
@@ -278,7 +426,9 @@ function relativeTime(iso: string): string {
         </svg>
         <svg v-else viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="4" />
-          <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4" />
+          <path
+            d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"
+          />
         </svg>
         {{ theme === 'light' ? '暗色模式' : '浅色模式' }}
       </button>
@@ -287,15 +437,90 @@ function relativeTime(iso: string): string {
           <path d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13" />
         </svg>
         回收站
+        <span v-if="Object.keys(deletedByWorkspace).length" class="fb-badge">
+          {{ Object.values(deletedByWorkspace).reduce((a, b) => a + b, 0) }}
+        </span>
       </button>
       <button class="foot-btn" @click="emit('open-settings')">
         <svg viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="2.6" />
-          <path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M5.8 5.8l1.6 1.6M16.6 16.6l1.6 1.6M18.2 5.8l-1.6 1.6M7.4 16.6l-1.6 1.6" />
+          <path
+            d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M5.8 5.8l1.6 1.6M16.6 16.6l1.6 1.6M18.2 5.8l-1.6 1.6M7.4 16.6l-1.6 1.6"
+          />
         </svg>
         设置
       </button>
     </div>
+
+    <!-- 下拉菜单 -->
+    <Teleport to="body">
+      <div v-if="menu" class="menu-pop" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
+        <button
+          v-for="item in menu.items"
+          :key="item.label"
+          class="menu-item"
+          :class="{ danger: item.danger }"
+          @click="runMenu(item)"
+        >
+          <svg viewBox="0 0 24 24"><path :d="ICONS[item.icon]" /></svg>
+          {{ item.label }}
+        </button>
+      </div>
+    </Teleport>
+
+    <!-- 详情弹窗 -->
+    <Teleport to="body">
+      <div v-if="detail" class="mask" @click.self="detail = null">
+        <div class="detail-box">
+          <div class="detail-title">{{ detail.title }}</div>
+          <div class="detail-body">
+            <div v-for="[k, v] in detail.rows" :key="k" class="detail-row">
+              <span class="dk">{{ k }}</span>
+              <span class="dv">{{ v }}</span>
+            </div>
+          </div>
+          <div class="detail-foot">
+            <button class="btn" @click="detail = null">关闭</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 确认弹窗 -->
+    <ConfirmDialog
+      v-if="pending?.kind === 'session'"
+      :title="`删除会话「${pending.title}」？`"
+      message="会话将移到回收站，可以随时恢复。若该会话正在生成回复，会先停止。"
+      confirm-text="移到回收站"
+      tone="warn"
+      @confirm="confirmPending"
+      @cancel="pending = null"
+    />
+    <ConfirmDialog
+      v-else-if="pending?.kind === 'workspace'"
+      :title="`删除工作区「${pending.name}」？`"
+      :message="
+        pending.sessionCount > 0
+          ? `将同时删除该工作区下的 ${pending.sessionCount} 个会话及其全部消息。磁盘上的项目目录不会被删除。`
+          : '磁盘上的项目目录不会被删除。'
+      "
+      :warning="
+        pending.deletedCount > 0
+          ? `此外，回收站里还有 ${pending.deletedCount} 个属于该工作区的会话会被一并永久删除。`
+          : undefined
+      "
+      confirm-text="删除"
+      tone="danger"
+      @confirm="confirmPending"
+      @cancel="pending = null"
+    />
+
+    <!-- 新建工作区弹窗 -->
+    <NewWorkspaceDialog
+      v-if="showNewWs"
+      @close="showNewWs = false"
+      @created="loadDeletedCounts()"
+    />
   </aside>
 </template>
 
@@ -306,86 +531,62 @@ function relativeTime(iso: string): string {
   min-height: 0;
   background: var(--bg-bar);
   border-right: 1px solid var(--line);
-  padding: 8px 8px 6px;
 }
 
-.new-chat {
+.side-top {
+  flex: none;
+  padding: 12px;
+}
+
+.btn-new-ws {
+  width: 100%;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--green);
+  color: #fff;
+  border: none;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  width: 100%;
-  height: 32px;
-  border-radius: var(--r);
-  background: var(--green);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 500;
-  margin-bottom: 10px;
-  transition: background 0.12s;
+  transition: background 0.15s;
 }
 
-.new-chat:hover {
+.btn-new-ws:hover {
   background: var(--green-h);
 }
 
-.new-chat svg {
-  width: 14px;
-  height: 14px;
+.btn-new-ws svg {
+  width: 15px;
+  height: 15px;
   stroke: currentColor;
   fill: none;
   stroke-width: 2;
   stroke-linecap: round;
 }
 
-.side-scroll {
+.side-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  scrollbar-width: thin;
-}
-
-.grp-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 9px 8px 5px;
-  font-size: 11.5px;
-  color: var(--t3);
-}
-
-.grp-label .sp {
-  flex: 1;
-}
-
-.mini-add {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  display: grid;
-  place-items: center;
-  color: var(--t3);
-  font-size: 13px;
-  line-height: 1;
-}
-
-.mini-add:hover {
-  background: var(--bg-hover);
-  color: var(--t1);
+  padding-bottom: 8px;
 }
 
 .ws {
-  margin-bottom: 2px;
+  margin-bottom: 6px;
 }
 
 .ws-head {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-height: 34px;
-  padding: 3px 8px;
-  border-radius: var(--r);
+  gap: 6px;
+  padding: 7px 8px;
+  margin: 0 8px;
+  border-radius: 7px;
   cursor: pointer;
   transition: background 0.12s;
 }
@@ -394,288 +595,266 @@ function relativeTime(iso: string): string {
   background: var(--bg-hover);
 }
 
-.tri {
-  width: 10px;
-  font-size: 8px;
+.ws-tri {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  display: grid;
+  place-items: center;
   color: var(--t4);
   transition: transform 0.15s;
-  flex: none;
-  text-align: center;
 }
 
-.tri.closed {
+.ws-tri svg {
+  width: 10px;
+  height: 10px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ws-tri.closed {
   transform: rotate(-90deg);
 }
 
-.fico {
-  display: flex;
-  color: var(--t3);
+.ws-ico {
+  width: 15px;
+  height: 15px;
   flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--t3);
 }
 
-.fico svg {
+.ws-ico svg {
   width: 15px;
   height: 15px;
   stroke: currentColor;
   fill: none;
   stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
-.wtext {
+.ws-name {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  line-height: 1.3;
-  overflow: hidden;
-}
-
-.wname {
-  flex: none;
   font-size: 13px;
   font-weight: 500;
+  line-height: 1;
+  color: var(--t1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.wpath {
-  font-family: var(--mono);
-  font-size: 9.5px;
-  color: var(--t4);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  /* 长路径优先保留尾部（项目名），用 dir=ltr + 反向省略不可行，
-     这里直接截断显示，title 提供完整路径 */
-  display: block;
 }
 
 .ws-rename {
-  width: 100%;
-  height: 20px;
-  padding: 0 4px;
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
   border: 1px solid var(--green);
-  border-radius: 4px;
+  border-radius: 5px;
   background: var(--surface);
-  font-size: 12.5px;
+  font-family: var(--font);
+  font-size: 13px;
   color: var(--t1);
+  outline: none;
 }
 
-.wcnt {
+.ws-count {
   font-size: 11px;
+  line-height: 16px;
   color: var(--t4);
   flex: none;
+  background: var(--bg-soft);
+  border-radius: 8px;
+  padding: 0 6px;
 }
 
-.ws-actions {
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: none;
-  gap: 2px;
-  padding: 1px 2px 1px 6px;
-  border-radius: 4px;
-  background: var(--bg-hover);
-  box-shadow: -6px 0 8px var(--bg-hover);
+.pin-dot {
+  color: var(--green);
+  margin-right: 3px;
 }
 
-.ws-head:hover .ws-actions {
+.ws-btns {
   display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
 }
 
-.ws-add {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
+.row-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  border-radius: 5px;
   color: var(--t3);
-  font-size: 12px;
-  line-height: 1;
-  flex: none;
+  cursor: pointer;
   display: grid;
   place-items: center;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
 }
 
-.ws-add:hover {
-  background: var(--bg-select);
+.row-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.row-btn.add {
+  color: var(--green);
+}
+
+.row-btn.add svg {
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+.row-btn.more svg {
+  fill: currentColor;
+}
+
+.ws-head:hover .row-btn,
+.chat-item:hover .row-btn,
+.chat-item.on .row-btn {
+  opacity: 1;
+}
+
+.row-btn.add:hover {
+  background: var(--green-soft);
+}
+
+.row-btn.more:hover {
+  background: var(--line);
   color: var(--t1);
 }
 
 .ws-body {
-  position: relative;
-  padding-left: 38px;
+  padding-top: 1px;
 }
 
-.ws-body::before {
-  content: '';
-  position: absolute;
-  left: 32px;
-  top: 0;
-  bottom: 8px;
-  width: 1px;
-  background: #e4e4e6;
-}
-
-.chat {
+.chat-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 29px;
-  padding: 4px 9px;
-  margin: 1px 0;
-  border-radius: var(--r);
-  font-size: 12.5px;
-  color: var(--t2);
-  text-align: left;
-  width: 100%;
-  transition: background 0.12s, color 0.12s;
-  position: relative;
+  gap: 6px;
+  margin: 1px 8px 1px 26px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.12s;
 }
 
-.chat:hover {
+.chat-item:hover {
   background: var(--bg-hover);
-  color: var(--t1);
 }
 
-.chat.on {
-  background: var(--bg-select);
-  color: var(--t1);
+.chat-item.on {
+  background: var(--green-soft);
+}
+
+.chat-item.on .chat-title {
+  color: var(--green);
   font-weight: 500;
 }
 
-.cn {
+.chat-title {
   flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--t1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.ctime {
-  font-size: 10.5px;
-  color: var(--t4);
-  flex: none;
-}
-
-.chat-actions {
-  display: none;
-  gap: 1px;
-  flex: none;
-}
-
-.chat:hover .chat-actions {
-  display: flex;
-}
-
-.chat:hover .ctime {
-  display: none;
-}
-
-.edit-btn {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  color: var(--t3);
-  font-size: 10px;
-  display: grid;
-  place-items: center;
-}
-
-.edit-btn:hover {
-  background: var(--bg-select);
-  color: var(--t1);
-}
-
-/* 流式中显示绿点，否则显示时间 */
-.cd.live {
-  animation: pulse-dot 1.6s ease-in-out infinite;
-}
-
-@keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.45;
-    transform: scale(0.8);
-  }
 }
 
 .rename-input {
   flex: 1;
   min-width: 0;
-  height: 21px;
-  padding: 0 5px;
+  height: 22px;
+  padding: 0 6px;
   border: 1px solid var(--green);
-  border-radius: 4px;
+  border-radius: 5px;
   background: var(--surface);
+  font-family: var(--font);
   font-size: 12.5px;
   color: var(--t1);
+  outline: none;
 }
 
-.cd {
-  width: 5px;
-  height: 5px;
+.chat-time {
+  font-size: 10.5px;
+  color: var(--t4);
+  flex: none;
+}
+
+.chat-dot {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   flex: none;
 }
 
-.cd.live {
+.chat-dot.live {
   background: var(--green);
+  animation: pulse 1.2s infinite;
 }
 
-.cd.idle {
-  background: #c6c6cb;
+.chat-dot.idle {
+  background: var(--line-3);
 }
 
-.ws-empty {
-  padding: 6px 9px;
-  font-size: 11.5px;
-  color: var(--t4);
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 
+.ws-empty,
 .side-empty {
-  padding: 20px 10px;
   font-size: 12px;
   color: var(--t4);
-  line-height: 1.7;
-}
-
-.side-error {
-  margin: 10px 8px 0;
-  padding: 8px 10px;
-  border-radius: var(--r);
-  background: var(--danger-bg);
-  border: 1px solid var(--danger-line);
-  color: var(--danger-t);
-  font-size: 11.5px;
+  padding: 10px 20px;
   line-height: 1.6;
 }
 
+.ws-empty {
+  padding-left: 26px;
+}
+
+/* 底部 */
 .side-foot {
   flex: none;
+  margin-top: auto;
+  padding: 8px;
+  border-top: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 8px 4px 2px;
-  border-top: 1px solid var(--line);
-  margin-top: 6px;
+  gap: 2px;
 }
 
 .foot-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 30px;
+  gap: 9px;
+  width: 100%;
+  height: 34px;
   padding: 0 9px;
-  border-radius: var(--r);
+  border: none;
+  background: none;
+  border-radius: 7px;
+  font-family: var(--font);
   font-size: 12.5px;
   color: var(--t2);
-  width: 100%;
+  cursor: pointer;
+  text-align: left;
   transition: background 0.12s, color 0.12s;
 }
 
@@ -687,10 +866,163 @@ function relativeTime(iso: string): string {
 .foot-btn svg {
   width: 15px;
   height: 15px;
+  flex: none;
   stroke: currentColor;
   fill: none;
-  stroke-width: 1.6;
+  stroke-width: 1.7;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.fb-badge {
+  margin-left: auto;
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--t4);
+  background: var(--bg-soft);
+  border-radius: 8px;
+  padding: 0 6px;
+}
+
+/* 下拉菜单 */
+.menu-pop {
+  position: fixed;
+  z-index: 300;
+  width: 190px;
+  transform: translateX(-100%);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  padding: 5px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  animation: menu-in 0.12s ease;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translate(-100%, -4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-100%, 0);
+  }
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  font-family: var(--font);
+  font-size: 12.5px;
+  color: var(--t1);
+  cursor: pointer;
+  text-align: left;
+}
+
+.menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.menu-item svg {
+  width: 14px;
+  height: 14px;
+  stroke: var(--t3);
+  fill: none;
+  stroke-width: 1.7;
+  flex: none;
+}
+
+.menu-item.danger {
+  color: var(--red);
+}
+
+.menu-item.danger svg {
+  stroke: var(--red);
+}
+
+.menu-item.danger:hover {
+  background: var(--danger-bg);
+}
+
+/* 详情弹窗 */
+.mask {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(20, 20, 24, 0.32);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.detail-box {
+  width: 420px;
+  max-width: calc(100vw - 48px);
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+.detail-title {
+  padding: 20px 22px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--t1);
+  border-bottom: 1px solid var(--line);
+}
+
+.detail-body {
+  padding: 14px 22px 18px;
+}
+
+.detail-row {
+  display: flex;
+  gap: 14px;
+  padding: 7px 0;
+  font-size: 12.5px;
+}
+
+.dk {
+  width: 72px;
+  flex: none;
+  color: var(--t4);
+}
+
+.dv {
+  flex: 1;
+  min-width: 0;
+  color: var(--t1);
+  word-break: break-all;
+}
+
+.detail-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 22px;
+  background: var(--bg-bar);
+  border-top: 1px solid var(--line);
+}
+
+.btn {
+  height: 34px;
+  padding: 0 18px;
+  border-radius: 8px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--t1);
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--bg-hover);
 }
 </style>

@@ -28,9 +28,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  async function add(dir: string): Promise<void> {
+  async function add(dir: string, name?: string): Promise<void> {
     try {
-      list.value = await window.api.workspace.add(dir)
+      list.value = await window.api.workspace.add(dir, name)
       error.value = null
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
@@ -44,26 +44,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   /**
-   * 移除工作区会级联删掉它下面的所有会话与消息（不可恢复），
-   * 因此必须先向用户确认，并明确告知后果。
+   * 移除工作区。确认流程由调用方用 ConfirmDialog 完成，
+   * 这里只负责执行，避免弹窗样式两套并存。
    */
-  async function remove(id: string, sessionCount: number, deletedCount = 0): Promise<boolean> {
-    const name = list.value.find((w) => w.id === id)?.name ?? '该工作区'
-    const parts: string[] = []
-    if (sessionCount > 0) parts.push(`${sessionCount} 个会话及其全部消息`)
-    if (deletedCount > 0) parts.push(`回收站里的 ${deletedCount} 个会话`)
-    const detail =
-      parts.length > 0
-        ? `移除「${name}」会同时永久删除它下面的${parts.join('、')}，且无法恢复。磁盘目录不会被删除。`
-        : `移除「${name}」？磁盘目录不会被删除。`
-    const ok = await window.api.dialog.confirm(detail)
-    if (!ok) return false
+  async function removeConfirmed(id: string): Promise<void> {
     list.value = await window.api.workspace.remove(id)
-    return true
   }
 
   async function rename(id: string, name: string): Promise<void> {
     list.value = await window.api.workspace.rename(id, name)
+  }
+
+  async function pin(id: string, pinned: boolean): Promise<void> {
+    list.value = await window.api.workspace.pin(id, pinned)
   }
 
   function toggle(id: string): void {
@@ -86,8 +79,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     load,
     add,
     pickAndAdd,
-    remove,
+    removeConfirmed,
     rename,
+    pin,
     toggle,
     isCollapsed
   }

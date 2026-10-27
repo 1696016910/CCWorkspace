@@ -9,10 +9,17 @@ interface WorkspaceRow {
   path: string
   name: string
   created_at: string
+  pinned_at: string | null
 }
 
 function toWorkspace(row: WorkspaceRow): Workspace {
-  return { id: row.id, path: row.path, name: row.name, addedAt: row.created_at }
+  return {
+    id: row.id,
+    path: row.path,
+    name: row.name,
+    addedAt: row.created_at,
+    pinnedAt: row.pinned_at ?? null
+  }
 }
 
 async function isDirectory(p: string): Promise<boolean> {
@@ -25,12 +32,19 @@ async function isDirectory(p: string): Promise<boolean> {
 
 export function listWorkspaces(): Workspace[] {
   const rows = getDb()
-    .prepare('SELECT id, path, name, created_at FROM workspaces ORDER BY created_at ASC')
+    // 置顶的排前面，其余按创建时间
+    .prepare(
+      `SELECT id, path, name, created_at, pinned_at FROM workspaces
+        ORDER BY pinned_at IS NULL, pinned_at DESC, created_at ASC`
+    )
     .all() as unknown as WorkspaceRow[]
   return rows.map(toWorkspace)
 }
 
-export async function addWorkspace(dir: string | null | undefined): Promise<Workspace[]> {
+export async function addWorkspace(
+  dir: string | null | undefined,
+  customName?: string
+): Promise<Workspace[]> {
   if (typeof dir !== 'string' || !dir.trim()) {
     throw new Error('请选择一个目录')
   }
@@ -49,10 +63,11 @@ export async function addWorkspace(dir: string | null | undefined): Promise<Work
     : db.prepare('SELECT id FROM workspaces WHERE path = ?').get(absolute)
   if (existing) throw new Error('该工作区已存在')
 
+  const name = (customName ?? '').trim() || basename(absolute)
   db.prepare('INSERT INTO workspaces(id, path, name, created_at) VALUES(?, ?, ?, ?)').run(
     randomUUID(),
     absolute,
-    basename(absolute),
+    name,
     new Date().toISOString()
   )
 
@@ -73,6 +88,18 @@ export function renameWorkspace(id: string, name: string): Workspace[] {
   const trimmed = name.trim()
   if (!trimmed) throw new Error('名称不能为空')
   getDb().prepare('UPDATE workspaces SET name = ? WHERE id = ?').run(trimmed, id)
+  return listWorkspaces()
+}
+
+/** 置顶 / 取消置顶工作区 */
+export function setWorkspacePinned(id: string, pinned: boolean): Workspace[] {
+  const db = getDb()
+  const exists = db.prepare('SELECT id FROM workspaces WHERE id = ?').get(id)
+  if (!exists) throw new Error('工作区不存在')
+  db.prepare('UPDATE workspaces SET pinned_at = ? WHERE id = ?').run(
+    pinned ? new Date().toISOString() : null,
+    id
+  )
   return listWorkspaces()
 }
 

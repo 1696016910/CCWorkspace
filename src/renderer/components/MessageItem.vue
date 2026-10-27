@@ -73,43 +73,48 @@ function openFile(path: string): void {
     </button>
   </div>
 
-  <div v-else class="msg-ai">
-    <div class="ai-role">
-      <span class="who">Claude</span>
-      <span class="tm">{{ time(message.timestamp) }}</span>
-    </div>
-
-    <button
-      v-if="hasTools"
-      class="done-chip"
-      :class="{ open: expanded }"
-      @click="expanded = !expanded"
-    >
-      <span class="chev">›</span> 已处理 · {{ message.tools?.length }} 步
-    </button>
-    <div v-if="hasTools && expanded" class="steps">
-      <div v-for="(t, i) in message.tools" :key="i" class="step">
-        <span class="si">{{ t.name.slice(0, 1) }}</span>
-        <span class="sname">{{ t.name }}</span>
-        <span class="sarg">{{ t.target }}</span>
+  <div v-else class="msg-ai" :data-mid="message.id">
+    <div class="a-avatar">C</div>
+    <div class="a-body">
+      <div class="ai-role">
+        <span class="who">Claude</span>
+        <span class="tm">{{ time(message.timestamp) }}</span>
       </div>
-    </div>
 
-    <!-- eslint-disable-next-line vue/no-v-html -- 已经过 DOMPurify 净化 -->
-    <div class="ai-text md" v-html="html" @click="onBodyClick" />
-
-    <div class="msg-actions">
-      <button class="act" :title="copied ? '已复制' : '复制'" @click="copyText">
-        <svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M15 5.5H6A1.5 1.5 0 004.5 7v9" /></svg>
-        <span>{{ copied ? '已复制' : '复制' }}</span>
+      <button
+        v-if="hasTools"
+        class="tool-pill"
+        :class="{ open: expanded }"
+        @click="expanded = !expanded"
+      >
+        <span class="tp-dot" />
+        <span>已处理 {{ message.tools?.length }} 步</span>
+        <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
       </button>
-    </div>
+      <div v-if="hasTools && expanded" class="steps">
+        <div v-for="(t, i) in message.tools" :key="i" class="step">
+          <span class="si">{{ t.name.slice(0, 1) }}</span>
+          <span class="sname">{{ t.name }}</span>
+          <span class="sarg">{{ t.target }}</span>
+        </div>
+      </div>
 
-    <div v-if="files.length" class="files">
-      <button v-for="f in files" :key="f" class="file-chip" :title="f" @click="openFile(f)">
-        <svg viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z" /><path d="M13 3.5v5h5" /></svg>
-        {{ f.split(/[\\/]/).pop() }}
-      </button>
+      <!-- eslint-disable-next-line vue/no-v-html -- 已经过 DOMPurify 净化 -->
+      <div class="ai-text md" v-html="html" @click="onBodyClick" />
+
+      <div class="msg-actions">
+        <button class="act" :title="copied ? '已复制' : '复制'" @click="copyText">
+          <svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M15 5.5H6A1.5 1.5 0 004.5 7v9" /></svg>
+          <span>{{ copied ? '已复制' : '复制' }}</span>
+        </button>
+      </div>
+
+      <div v-if="files.length" class="files">
+        <button v-for="f in files" :key="f" class="file-chip" :title="f" @click="openFile(f)">
+          <svg viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z" /><path d="M13 3.5v5h5" /></svg>
+          {{ f.split(/[\\/]/).pop() }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -152,6 +157,7 @@ function openFile(path: string): void {
 
 .act {
   display: inline-flex;
+  height: 26px;
   align-items: center;
   gap: 5px;
   height: 24px;
@@ -184,8 +190,9 @@ function openFile(path: string): void {
 }
 
 .msg-user .bubble {
-  background: var(--bg-bubble);
-  border-radius: 8px;
+  background: var(--bg-soft);
+  /* 右下角小圆角指向发送者，像 iMessage */
+  border-radius: 14px 14px 4px 14px;
   padding: 11px 15px;
   font-size: 13.5px;
   line-height: 20px;
@@ -196,7 +203,9 @@ function openFile(path: string): void {
 }
 
 .msg-ai {
-  margin-bottom: 30px;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 26px;
   animation: msg-in 0.22s ease both;
   /* 长会话 80 条消息会产生 3 万+ DOM 节点，浏览器要全部布局一遍。
      content-visibility 让视口外的消息跳过布局与绘制，
@@ -204,6 +213,25 @@ function openFile(path: string): void {
      避免滚动条跳动。 */
   content-visibility: auto;
   contain-intrinsic-size: auto 200px;
+}
+
+.a-avatar {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--green-soft);
+  color: var(--green);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 1px;
+}
+
+.a-body {
+  flex: 1;
+  min-width: 0;
 }
 
 .ai-role {
@@ -226,20 +254,49 @@ function openFile(path: string): void {
   color: var(--t4);
 }
 
-.done-chip {
+.tool-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 27px;
+  height: 26px;
   padding: 0 10px;
-  margin-bottom: 14px;
-  border-radius: 7px;
-  border: 1px solid var(--line-2);
-  background: var(--surface);
-  font-size: 12.5px;
-  color: var(--t2);
+  margin-bottom: 10px;
+  border: none;
+  border-radius: 13px;
+  background: var(--bg-soft);
+  font-family: var(--font);
+  font-size: 11.5px;
+  color: var(--t3);
+  cursor: pointer;
   transition: background 0.12s;
 }
+
+.tool-pill:hover {
+  background: var(--bg-hover);
+}
+
+.tool-pill .tp-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.tool-pill svg {
+  width: 12px;
+  height: 12px;
+  stroke: var(--t4);
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.15s;
+}
+
+.tool-pill.open svg {
+  transform: rotate(180deg);
+}
+
 
 .done-chip:hover {
   background: var(--bg-soft);

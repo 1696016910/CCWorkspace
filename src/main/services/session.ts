@@ -13,6 +13,7 @@ interface SessionRow {
   created_at: string
   updated_at: string
   deleted_at: string | null
+  pinned_at?: string | null
   message_count: number
   claude_session_id: string | null
   context_tokens: number
@@ -38,7 +39,8 @@ function toSummary(row: SessionRow): SessionSummary {
     running: false,
     renamed: row.auto_title === 0,
     contextPercent: row.context_percent ?? 0,
-    contextTokens: row.context_tokens ?? 0
+    contextTokens: row.context_tokens ?? 0,
+    pinnedAt: row.pinned_at ?? null
   }
 }
 
@@ -63,13 +65,13 @@ export function listSessions(): SessionSummary[] {
   const rows = getDb()
     .prepare(
       `SELECT s.id, s.workspace_id, s.title, s.auto_title, s.created_at, s.updated_at, s.deleted_at,
-              s.claude_session_id, s.context_tokens, s.context_max, s.context_percent,
+              s.claude_session_id, s.context_tokens, s.context_max, s.context_percent, s.pinned_at,
               COUNT(m.id) AS message_count
          FROM sessions s
          LEFT JOIN messages m ON m.session_id = s.id
         WHERE s.deleted_at IS NULL
         GROUP BY s.id
-        ORDER BY s.updated_at DESC`
+        ORDER BY s.pinned_at IS NULL, s.pinned_at DESC, s.updated_at DESC`
     )
     .all() as unknown as SessionRow[]
   return rows.map(toSummary)
@@ -163,6 +165,17 @@ export function purgeSession(id: string): void {
     }
     throw e
   }
+}
+
+/** 置顶 / 取消置顶会话 */
+export function setSessionPinned(id: string, pinned: boolean): void {
+  const db = getDb()
+  const exists = db.prepare('SELECT id FROM sessions WHERE id = ?').get(id)
+  if (!exists) throw new Error('会话不存在')
+  db.prepare('UPDATE sessions SET pinned_at = ? WHERE id = ?').run(
+    pinned ? new Date().toISOString() : null,
+    id
+  )
 }
 
 /** 复制会话：连同消息一起复制，生成新的 id */

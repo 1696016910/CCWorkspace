@@ -36,7 +36,8 @@ function runMigrations(db: DatabaseSync, versions: number[]): void {
 describe('数据库迁移', () => {
   it('从空库一次跑到最新版本', () => {
     const db = new DatabaseSync(':memory:')
-    runMigrations(db, [1, 2])
+    const allVersions = Array.from({ length: SCHEMA_VERSION }, (_, i) => i + 1)
+    runMigrations(db, allVersions)
     const v = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as {
       value: string
     }
@@ -75,8 +76,9 @@ describe('数据库迁移', () => {
 
   it('重复调用是幂等的', () => {
     const db = new DatabaseSync(':memory:')
-    runMigrations(db, [1, 2])
-    expect(() => runMigrations(db, [1, 2])).not.toThrow()
+    const allVersions = Array.from({ length: SCHEMA_VERSION }, (_, i) => i + 1)
+    runMigrations(db, allVersions)
+    expect(() => runMigrations(db, allVersions)).not.toThrow()
     db.close()
   })
 })

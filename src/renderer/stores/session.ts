@@ -149,6 +149,11 @@ export const useSessionStore = defineStore('session', () => {
     await load()
   }
 
+  async function pin(id: string, pinned: boolean): Promise<void> {
+    await window.api.session.pin(id, pinned)
+    await load()
+  }
+
   async function duplicate(id: string): Promise<void> {
     const copy = await window.api.session.duplicate(id)
     await load()
@@ -174,6 +179,7 @@ export const useSessionStore = defineStore('session', () => {
     rename,
     remove,
     duplicate,
+    pin,
     sessionsOf,
     setRunning,
     isRunning

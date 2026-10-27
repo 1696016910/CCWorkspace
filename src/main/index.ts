@@ -8,6 +8,7 @@ import {
   listWorkspaces,
   removeWorkspace,
   renameWorkspace,
+  setWorkspacePinned,
   getTheme,
   setTheme
 } from './services/workspace'
@@ -21,7 +22,8 @@ import {
   listSessions,
   renameSession,
   restoreSession,
-  purgeSession
+  purgeSession,
+  setSessionPinned
 } from './services/session'
 import {
   assertCanSend,
@@ -458,9 +460,10 @@ function registerIpc(): void {
 
   /* 工作区 */
   handle('workspace:list', () => listWorkspaces())
-  handle('workspace:add', (dir: string) => addWorkspace(dir))
+  handle('workspace:add', (dir: string, name?: string) => addWorkspace(dir, name))
   handle('workspace:remove', (id: string) => removeWorkspace(id))
   handle('workspace:rename', (id: string, name: string) => renameWorkspace(id, name))
+  handle('workspace:pin', (id: string, pinned: boolean) => setWorkspacePinned(id, pinned))
   handle('workspace:pick', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory'],
@@ -479,6 +482,7 @@ function registerIpc(): void {
   handle('session:remove', (id: string) => deleteSession(id))
   handle('session:restore', (id: string) => restoreSession(id))
   handle('session:duplicate', (id: string) => duplicateSession(id))
+  handle('session:pin', (id: string, pinned: boolean) => setSessionPinned(id, pinned))
   handle('session:purge', (id: string) => {
     purgeSession(id)
     forgetContext(id)

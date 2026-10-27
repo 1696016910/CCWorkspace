@@ -65,10 +65,13 @@ const api = {
 
   workspace: {
     list: (): Promise<Workspace[]> => unwrap(ipcRenderer.invoke('workspace:list')),
-    add: (dir: string): Promise<Workspace[]> => unwrap(ipcRenderer.invoke('workspace:add', dir)),
+    add: (dir: string, name?: string): Promise<Workspace[]> =>
+      unwrap(ipcRenderer.invoke('workspace:add', dir, name)),
     remove: (id: string): Promise<Workspace[]> => unwrap(ipcRenderer.invoke('workspace:remove', id)),
     rename: (id: string, name: string): Promise<Workspace[]> =>
       unwrap(ipcRenderer.invoke('workspace:rename', id, name)),
+    pin: (id: string, pinned: boolean): Promise<Workspace[]> =>
+      unwrap(ipcRenderer.invoke('workspace:pin', id, pinned)),
     pick: (): Promise<string | null> => unwrap(ipcRenderer.invoke('workspace:pick'))
   },
 
@@ -86,7 +89,9 @@ const api = {
     remove: (id: string): Promise<void> => unwrap(ipcRenderer.invoke('session:remove', id)),
     restore: (id: string): Promise<void> => unwrap(ipcRenderer.invoke('session:restore', id)),
     purge: (id: string): Promise<void> => unwrap(ipcRenderer.invoke('session:purge', id)),
-    duplicate: (id: string): Promise<SessionSummary> => unwrap(ipcRenderer.invoke('session:duplicate', id))
+    duplicate: (id: string): Promise<SessionSummary> => unwrap(ipcRenderer.invoke('session:duplicate', id)),
+    pin: (id: string, pinned: boolean): Promise<void> =>
+      unwrap(ipcRenderer.invoke('session:pin', id, pinned))
   },
 
   chat: {

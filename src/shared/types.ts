@@ -6,6 +6,8 @@ export interface Workspace {
   /** 展示名称，默认取目录名 */
   name: string
   addedAt: string
+  /** 是否置顶（置顶时间戳，null 表示未置顶） */
+  pinnedAt: string | null
 }
 
 /** 会话在列表中的展示形态 */
@@ -24,6 +26,8 @@ export interface SessionSummary {
   contextPercent: number
   /** 上下文已用 token */
   contextTokens: number
+  /** 是否置顶（置顶时间戳，null 表示未置顶） */
+  pinnedAt: string | null
 }
 
 /** 对话流中的一条消息 */

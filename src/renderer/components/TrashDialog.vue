@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import type { SessionSummary } from '@shared/types'
+import ConfirmDialog from './ConfirmDialog.vue'
 
 const emit = defineEmits<{ close: []; restored: [] }>()
 
@@ -22,14 +23,14 @@ async function restore(id: string): Promise<void> {
   emit('restored')
 }
 
-/* Electron 不支持 window.confirm，用原生对话框 */
+/** 待确认的彻底删除 */
+const pendingPurge = ref<SessionSummary | null>(null)
 const confirmingId = ref<string | null>(null)
 
-async function purge(s: SessionSummary): Promise<void> {
-  const ok = await window.api.dialog.confirm(
-    `彻底删除「${s.title}」？此操作不可恢复，消息将永久从数据库中移除。`
-  )
-  if (!ok) return
+async function confirmPurge(): Promise<void> {
+  const s = pendingPurge.value
+  pendingPurge.value = null
+  if (!s) return
   confirmingId.value = s.id
   try {
     await window.api.session.purge(s.id)
@@ -69,13 +70,23 @@ onUnmounted(() => window.removeEventListener('keydown', onEsc))
               <div class="meta">{{ s.messageCount }} 条消息 · {{ new Date(s.updatedAt).toLocaleString() }}</div>
             </div>
             <button class="btn" @click="restore(s.id)">恢复</button>
-            <button class="btn dgr" :disabled="confirmingId === s.id" @click="purge(s)">
+            <button class="btn dgr" :disabled="confirmingId === s.id" @click="pendingPurge = s">
               {{ confirmingId === s.id ? '删除中…' : '彻底删除' }}
             </button>
           </div>
         </div>
       </div>
     </div>
+
+    <ConfirmDialog
+      v-if="pendingPurge"
+      title="彻底删除？"
+      :message="`「${pendingPurge.title}」及其全部消息将被永久删除，无法恢复。`"
+      confirm-text="永久删除"
+      tone="danger"
+      @confirm="confirmPurge"
+      @cancel="pendingPurge = null"
+    />
   </div>
 </template>
 

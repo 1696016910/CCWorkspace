@@ -664,23 +664,28 @@ async function stop(): Promise<void> {
         />
 
         <div v-if="chat.streaming && chat.streamingSessionId === current?.id" class="msg-ai">
-          <div class="ai-role"><span class="who">Claude</span></div>
-          <div v-if="chat.streamTools.length" class="steps">
-            <div v-for="(t, i) in chat.streamTools" :key="i" class="step">
-              <span class="si">{{ t.name.slice(0, 1) }}</span>
-              <span class="sname">{{ t.name }}</span>
-              <span class="sarg">{{ t.target }}</span>
+          <div class="a-avatar">C</div>
+          <div class="a-body">
+            <div class="ai-role"><span class="who">Claude</span></div>
+            <div v-if="chat.streamTools.length" class="steps">
+              <div v-for="(t, i) in chat.streamTools" :key="i" class="step">
+                <span class="si">{{ t.name.slice(0, 1) }}</span>
+                <span class="sname">{{ t.name }}</span>
+                <span class="sarg">{{ t.target }}</span>
+              </div>
             </div>
-          </div>
-          <div
-            v-if="chat.streamText"
-            class="ai-text md"
-            v-html="streamHtml"
-            @click="onStreamClick"
-          />
-          <div v-else class="thinking">
-            <span class="dot" /><span class="dot" /><span class="dot" />
-            <span class="thinking-label">正在思考</span>
+            <div
+              v-if="chat.streamText"
+              class="ai-text md"
+              v-html="streamHtml"
+              @click="onStreamClick"
+            />
+            <div v-else class="thinking">
+              <span class="dots">
+                <span class="dot" /><span class="dot" /><span class="dot" />
+              </span>
+              <span class="thinking-label">正在思考…</span>
+            </div>
           </div>
         </div>
 
@@ -1058,7 +1063,9 @@ async function stop(): Promise<void> {
 }
 
 .msg-ai {
-  margin-bottom: 30px;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 26px;
 }
 
 .ai-role {
@@ -1113,6 +1120,25 @@ async function stop(): Promise<void> {
   white-space: nowrap;
 }
 
+.a-avatar {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--green-soft);
+  color: var(--green);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 1px;
+}
+
+.a-body {
+  flex: 1;
+  min-width: 0;
+}
+
 .ai-text {
   font-size: 13.5px;
   line-height: 23px;
@@ -1124,9 +1150,15 @@ async function stop(): Promise<void> {
 .thinking {
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: 23px;
+  gap: 7px;
+  height: 28px;
   color: var(--t3);
+  font-size: 12.5px;
+}
+
+.thinking .dots {
+  display: flex;
+  gap: 3px;
 }
 
 .thinking .dot {
