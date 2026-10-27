@@ -118,16 +118,41 @@ async function doCompact(): Promise<void> {
  * 流式输出时每次增量都调用，必须用 instant 且只在用户已接近底部时跟随，
  * 否则既卡顿又会打断用户向上翻阅历史。
  */
-async function scrollToBottom(smooth = false): Promise<void> {
+/**
+ * 滚动到底部。
+ *
+ * @param smooth 是否平滑滚动
+ * @param force  忽略"用户已上翻"的判断，强制滚到底。
+ *               切换会话时必须用 true：新会话的 scrollTop 初始为 0，
+ *               不加 force 会被下面的守卫当成"用户正在上翻"而直接返回，
+ *               结果停在最顶部——也就是最早的对话。
+ */
+async function scrollToBottom(smooth = false, force = false): Promise<void> {
   await nextTick()
   const el = thread.value
   if (!el) return
-  // 只读一次 scrollHeight：再读一次会多触发一次强制布局
-  const height = el.scrollHeight
-  const distance = height - el.scrollTop - el.clientHeight
-  // 用户主动上翻超过一屏时不再强制跟随
-  if (distance > el.clientHeight * 1.2) return
-  el.scrollTo({ top: height, behavior: smooth ? 'smooth' : 'auto' })
+
+  const jump = (): void => {
+    const height = el.scrollHeight
+    if (!force) {
+      const distance = height - el.scrollTop - el.clientHeight
+      // 流式输出时用户主动上翻超过一屏就不再强制跟随，避免打断阅读
+      if (distance > el.clientHeight * 1.2) return
+    }
+    el.scrollTo({ top: height, behavior: smooth ? 'smooth' : 'auto' })
+  }
+
+  jump()
+
+  // 消息项用了 content-visibility: auto，视口外的内容高度是惰性计算的：
+  // 第一次调用时 scrollHeight 只反映已渲染的部分（实测 1560 vs 最终 14114），
+  // 滚过去之后才逐步补全。这里连做几帧校正，确保真正落到底。
+  if (force) {
+    for (const delay of [16, 60, 160]) {
+      await new Promise((r) => setTimeout(r, delay))
+      jump()
+    }
+  }
 }
 
 /**
@@ -206,8 +231,26 @@ watch(
         commands.value = await window.api.commands.list(active.id)
       })
     }
-    await nextTick()
-    void scrollToBottom(true)
+    // currentId 变了但消息还没加载完，此时滚动没有意义（列表还是空的）。
+    // 真正的滚动交给下面的 messages 监听，等消息渲染后再滚。
+  }
+)
+
+/**
+ * 消息加载完成后滚到底部。
+ *
+ * 切会话时 currentId 先变、messages 异步后到，所以必须监听 messages。
+ * 这里用 length 做比较：切会话时从 0 变成 N，能触发；
+ * 流式追加时也会触发，但那时有单独的逻辑，用 streaming 状态排除。
+ */
+watch(
+  () => sessions.messages.length,
+  async (len, prev) => {
+    // 只在"从空到有"或"切换到另一个会话"时强制滚到底
+    if (len > 0 && prev === 0) {
+      await nextTick()
+      void scrollToBottom(false, true)
+    }
   }
 )
 
