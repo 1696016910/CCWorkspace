@@ -3,8 +3,11 @@ node_modules/
 dist/
 dist-electron/
 out/
-# 只忽略根目录的打包产物；不加前导斜杠会连 .claude/skills/release/ 一起忽略
+# 各实现的打包产物；不加前导斜杠会连 .claude/skills/release/ 一起忽略
 /release/
+node/release/
+go/build/
+rust/target/
 *.tsbuildinfo
 
 # 临时文件（规则要求放 temp/ 且用完即删）

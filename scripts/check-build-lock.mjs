@@ -19,12 +19,26 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const target = join(root, 'release')
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const kill = process.argv.includes('--kill')
 
+/**
+ * 目标目录。
+ *
+ * 仓库现在有三个实现（node/ go/ rust/），各自的构建产物在各自目录下。
+ * 用 --path 指定要检查哪个，默认检查 node/release。
+ *
+ *   node scripts/check-build-lock.mjs --path node/release
+ *   node scripts/check-build-lock.mjs --path go/build
+ */
+const pathArgIdx = process.argv.indexOf('--path')
+const target =
+  pathArgIdx >= 0 && process.argv[pathArgIdx + 1]
+    ? resolve(repoRoot, process.argv[pathArgIdx + 1])
+    : join(repoRoot, 'node', 'release')
+
 if (!existsSync(target)) {
-  console.log('release/ 不存在，无需检查')
+  console.log(`${target} 不存在，无需检查`)
   process.exit(0)
 }
 
@@ -96,7 +110,7 @@ try {
 }
 
 if (out === 'EMPTY' || out === 'NONE') {
-  console.log('release/ 未被任何进程占用')
+  console.log(`${target} 未被任何进程占用`)
   process.exit(0)
 }
 
@@ -109,7 +123,7 @@ const holders = out
     return { pid: Number(pid), name }
   })
 
-console.log(`release/ 正被 ${holders.length} 个进程占用：`)
+console.log(`${target} 正被 ${holders.length} 个进程占用：`)
 for (const h of holders) console.log(`  ${h.name} (PID ${h.pid})`)
 
 // 本项目自己的进程可以安全结束；编辑器等其他程序只提示不动手

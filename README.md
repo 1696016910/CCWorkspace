@@ -21,11 +21,31 @@
 
 ---
 
+## 三份实现
+
+同一个应用有三个独立实现，代码互不共享：
+
+| 目录 | 技术栈 | 安装包 |
+|---|---|---|
+| `node/` | Electron 45 + Vue 3 + TypeScript | ~285 MB |
+| `go/` | Fyne + Go | ~20 MB |
+| `rust/` | egui + Rust | ~15 MB |
+
+三者读写**同一个** SQLite 数据库（`%APPDATA%/claude-workbench/workbench.db`），
+装哪个都能看到同一批工作区与会话。都依赖 PATH 中的 `claude` 可执行文件，不内置。
+
+`prototype/` 是三份设计稿与可交互原型，`openspec/` 是功能规格，两者不属于任何一份实现。
+
+---
+
 ## 安装与运行
+
+### Node 版
 
 需要 Node.js 20+ 与 Electron 45。
 
 ```bash
+cd node
 npm install
 npm run dev        # 开发模式
 ```
@@ -37,15 +57,54 @@ export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
 node node_modules/electron/install.js
 ```
 
-### 打包
+#### 打包
 
 ```bash
+cd node
 npm run dist        # Windows
-npm run dist:mac    # macOS
-npm run dist:linux  # Linux
 ```
 
-产物在 `release/` 下。
+产物在 `node/release/` 下。
+
+### Go 版
+
+需要 Go 1.21+。构建前先装依赖：
+
+```bash
+cd go
+go mod tidy
+```
+
+开发运行：
+
+```bash
+go run .
+```
+
+打包（产物在 `go/build/`）：
+
+```bash
+go build -ldflags="-H windowsgui -s -w" -o build/claude-workbench-go.exe .
+```
+
+### Rust 版
+
+需要 Rust 1.75+。
+
+```bash
+cd rust
+cargo run --release
+```
+
+打包（产物在 `rust/target/release/`）：
+
+```bash
+cargo build --release
+```
+
+---
+
+产物命名
 
 产物统一命名为 `ClaudeWorkbench-<版本>-<架构>.<扩展名>`。必须是 ASCII：
 中文名会被百分号编码进 `latest.yml` 的下载地址，多数更新代理会直接返回 400。
