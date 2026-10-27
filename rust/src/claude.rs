@@ -383,3 +383,37 @@ mod tests {
         assert_eq!(pct, 10.0, "cache token 漏算会让百分比变成 1");
     }
 }
+
+#[cfg(test)]
+mod real_tests {
+    use super::*;
+
+    /// 真实调用 claude 验证端到端链路。
+    /// `cargo test --release -- --ignored` 才会跑。
+    #[test]
+    #[ignore]
+    fn real_chat_roundtrip() {
+        let mut acc = String::new();
+        let mut got_session = false;
+        let res = run(
+            Options {
+                cwd: "D:/Project/AI/CCWorkspace".into(),
+                text: "只回复两个字：收到".into(),
+                model: String::new(),
+                resume: String::new(),
+                mode: "acceptEdits".into(),
+                skills: vec![],
+                env: vec![],
+            },
+            |e| match e {
+                Event::Text(t) => acc.push_str(&t),
+                Event::ClaudeSession(_) => got_session = true,
+                _ => {}
+            },
+        );
+        assert!(res.is_ok(), "对话失败: {res:?}");
+        assert!(!acc.is_empty(), "没有收到任何文本");
+        assert!(got_session, "没有收到 CLI 会话 id");
+        println!("回复: {acc:?}");
+    }
+}

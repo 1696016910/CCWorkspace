@@ -331,6 +331,20 @@ impl eframe::App for App {
                     }
                 });
 
+                if ui.button("删除工作区").clicked() {
+                    if let Some(id) = self.current_ws.clone() {
+                        let name = self
+                            .workspaces
+                            .iter()
+                            .find(|w| w.id == id)
+                            .map(|w| w.name.clone())
+                            .unwrap_or_default();
+                        self.pending_delete = Some((id, name, true));
+                    } else {
+                        self.status = "请先选择一个工作区".into();
+                    }
+                }
+
                 ui.separator();
                 if ui.button("＋ 新建会话").clicked() {
                     if let (Some(conn), Some(ws)) = (&self.conn, self.current_ws.clone()) {
@@ -343,6 +357,19 @@ impl eframe::App for App {
                         }
                     } else {
                         self.status = "请先选择一个工作区".into();
+                    }
+                }
+                if ui.button("删除会话").clicked() {
+                    if let Some(id) = self.current_ses.clone() {
+                        let title = self
+                            .sessions
+                            .iter()
+                            .find(|s| s.id == id)
+                            .map(|s| if s.title.is_empty() { "(新会话)".to_string() } else { s.title.clone() })
+                            .unwrap_or_default();
+                        self.pending_delete = Some((id, title, false));
+                    } else {
+                        self.status = "请先选择一个会话".into();
                     }
                 }
                 ui.label(egui::RichText::new("会话").small().weak());
@@ -437,6 +464,59 @@ impl eframe::App for App {
                     }
                 });
         });
+
+        // ── 删除确认弹窗 ──
+        if let Some((id, name, is_ws)) = self.pending_delete.clone() {
+            let mut open = true;
+            let (kind, hint) = if is_ws {
+                ("工作区", "将同时删除它下面的所有会话与消息，且无法恢复。磁盘目录不会被删除。")
+            } else {
+                ("会话", "会移到回收站，可以随时恢复。")
+            };
+            egui::Window::new(format!("删除{kind}"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label(format!("确定删除「{name}」？"));
+                    ui.label(egui::RichText::new(hint).small().weak());
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("确定删除").clicked() {
+                            if let Some(conn) = &self.conn {
+                                let r = if is_ws {
+                                    service::remove_workspace(conn, &id)
+                                } else {
+                                    service::delete_session(conn, &id)
+                                };
+                                match r {
+                                    Ok(()) => {
+                                        if is_ws && self.current_ws.as_deref() == Some(&id) {
+                                            self.current_ws = None;
+                                            self.current_ses = None;
+                                            self.messages.clear();
+                                        }
+                                        if !is_ws && self.current_ses.as_deref() == Some(&id) {
+                                            self.current_ses = None;
+                                            self.messages.clear();
+                                        }
+                                        self.reload();
+                                        self.status = if is_ws { "已删除工作区".into() } else { "已移到回收站".into() };
+                                    }
+                                    Err(e) => self.status = e,
+                                }
+                            }
+                            self.pending_delete = None;
+                        }
+                        if ui.button("取消").clicked() {
+                            self.pending_delete = None;
+                        }
+                    });
+                });
+            if !open {
+                self.pending_delete = None;
+            }
+        }
 
         // ── 新建工作区弹窗 ──
         if self.show_new_ws {

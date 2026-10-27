@@ -46,6 +46,11 @@ type MainWindow struct {
 	// 注入的业务层
 	api  API
 	chat ChatFn
+
+	// 待确认的删除："session" 或 "workspace"
+	pendingKind string
+	pendingID   string
+	pendingName string
 }
 
 // NewMainWindow 构建主窗口。
@@ -117,11 +122,41 @@ func (m *MainWindow) build() {
 	newWsBtn := widget.NewButtonWithIcon("新建工作区", theme.ContentAddIcon(), m.promptNewWorkspace)
 	newSessBtn := widget.NewButtonWithIcon("新建会话", theme.ContentAddIcon(), m.newSession)
 
+	// 删除入口：选中项后点删除，先弹确认
+	delWsBtn := widget.NewButton("删除工作区", func() {
+		if m.currentWS == "" {
+			m.setStatus("请先选择一个工作区")
+			return
+		}
+		for _, w := range m.workspaces {
+			if w.ID == m.currentWS {
+				m.askDelete("workspace", w.ID, w.Name)
+				return
+			}
+		}
+	})
+	delSesBtn := widget.NewButton("删除会话", func() {
+		if m.currentSes == "" {
+			m.setStatus("请先选择一个会话")
+			return
+		}
+		for _, s := range m.sessions {
+			if s.ID == m.currentSes {
+				title := s.Title
+				if title == "" {
+					title = "(新会话)"
+				}
+				m.askDelete("session", s.ID, title)
+				return
+			}
+		}
+	})
+
 	wsPane := container.NewBorder(
-		container.NewVBox(newWsBtn, widget.NewLabel("工作区")),
+		container.NewVBox(newWsBtn, delWsBtn, widget.NewLabel("工作区")),
 		nil, nil, nil, wsList)
 	sessPane := container.NewBorder(
-		container.NewVBox(newSessBtn, widget.NewLabel("会话")),
+		container.NewVBox(newSessBtn, delSesBtn, widget.NewLabel("会话")),
 		nil, nil, nil, sessList)
 
 	// 上下两半，各自带滚动；固定最小宽度避免被右侧对话区挤压
@@ -284,6 +319,62 @@ func (m *MainWindow) promptNewWorkspace() {
 		m.workspaces = list
 		m.refreshNames()
 	}, m.win)
+}
+
+// setStatus 更新状态栏，供回调里使用。
+func (m *MainWindow) setStatus(text string) {
+	m.statusLabel.SetText(text)
+}
+
+// askDelete 弹出删除确认。
+func (m *MainWindow) askDelete(kind, id, name string) {
+	m.pendingKind, m.pendingID, m.pendingName = kind, id, name
+	label := "会话"
+	tone := "移到回收站，可以随时恢复"
+	if kind == "workspace" {
+		label = "工作区"
+		tone = "将同时删除它下面的所有会话与消息，且无法恢复。磁盘目录不会被删除"
+	}
+	dialog.ShowConfirm(
+		"删除"+label,
+		"确定删除「"+name+"」？\n"+tone,
+		func(ok bool) {
+			if !ok {
+				m.pendingKind = ""
+				return
+			}
+			m.confirmDelete()
+		}, m.win)
+}
+
+func (m *MainWindow) confirmDelete() {
+	kind, id := m.pendingKind, m.pendingID
+	m.pendingKind = ""
+	switch kind {
+	case "workspace":
+		if _, err := m.api.RemoveWorkspace(id); err != nil {
+			m.setStatus(err.Error())
+			return
+		}
+		if m.currentWS == id {
+			m.currentWS = ""
+		}
+		m.workspaces = m.api.LoadWorkspaces()
+		m.refreshNames()
+		m.refreshSessions()
+		m.setStatus("已删除工作区")
+	case "session":
+		if err := m.api.DeleteSession(id); err != nil {
+			m.setStatus(err.Error())
+			return
+		}
+		if m.currentSes == id {
+			m.currentSes = ""
+			m.chatBox.RemoveAll()
+		}
+		m.refreshSessions()
+		m.setStatus("已移到回收站")
+	}
 }
 
 func (m *MainWindow) newSession() {
