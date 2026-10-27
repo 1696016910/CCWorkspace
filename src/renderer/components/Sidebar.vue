@@ -37,7 +37,13 @@ function openMenu(e: MouseEvent, items: MenuItem[]): void {
   e.stopPropagation()
   e.preventDefault()
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  menu.value = { x: rect.right, y: rect.bottom + 4, items }
+  const MENU_W = 190
+  // 优先从按钮右侧展开，不遮挡列表内容。
+  // 右侧空间不够时（会超出窗口）改为从按钮左边对齐展开。
+  const right = rect.right + 4
+  const x =
+    right + MENU_W > window.innerWidth - 8 ? Math.max(8, rect.left - MENU_W - 4) : right
+  menu.value = { x, y: rect.bottom + 4, items }
 }
 
 function closeMenu(): void {
@@ -889,7 +895,6 @@ const ICONS: Record<string, string> = {
   position: fixed;
   z-index: 300;
   width: 190px;
-  transform: translateX(-100%);
   background: var(--surface);
   border: 1px solid var(--line-2);
   border-radius: 9px;
@@ -901,11 +906,11 @@ const ICONS: Record<string, string> = {
 @keyframes menu-in {
   from {
     opacity: 0;
-    transform: translate(-100%, -4px);
+    transform: translateY(-4px);
   }
   to {
     opacity: 1;
-    transform: translate(-100%, 0);
+    transform: translateY(0);
   }
 }
 
