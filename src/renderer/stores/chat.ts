@@ -11,6 +11,7 @@ export interface ChatEvent {
   tool?: ToolCall
   message?: ChatMessage
   usage?: { inputTokens: number; outputTokens: number; costUsd: number }
+  interrupted?: boolean
 }
 
 export const useChatStore = defineStore('chat', () => {
@@ -94,7 +95,10 @@ export const useChatStore = defineStore('chat', () => {
           activeRunId.value = 0
           if (e.usage) usage.value = e.usage
           // 带上 sessionId，由界面判断这条消息是否属于当前正在看的会话
-          if (e.message) listeners.onDone(e.message, e.sessionId)
+          if (e.message) {
+            // 把中断标记带给消息，界面据此显示「已停止生成」
+            listeners.onDone({ ...e.message, stopped: e.interrupted === true }, e.sessionId)
+          }
           streamText.value = ''
           streamTools.value = []
           listeners.onFinish(e.sessionId)

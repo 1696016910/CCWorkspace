@@ -116,7 +116,7 @@ onMounted(load)
 <style scoped>
 .env-table {
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
   background: var(--surface);
 }
@@ -150,14 +150,14 @@ onMounted(load)
 
 .env-tr input {
   width: 100%;
-  padding: 8px 6px;
+  padding: 10px 8px;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--t2);
 }
 
 .env-tr input.k {
-  color: #2f5da8;
+  color: var(--blue);
   padding-left: 12px;
 }
 

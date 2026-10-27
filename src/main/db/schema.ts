@@ -5,7 +5,7 @@
  * 迁移只增不改——已发布的版本不再修改，避免用户库结构漂移。
  */
 
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 export const MIGRATIONS: Record<number, string> = {
   1: `
@@ -65,5 +65,13 @@ export const MIGRATIONS: Record<number, string> = {
   3: `
     ALTER TABLE workspaces ADD COLUMN pinned_at TEXT;
     ALTER TABLE sessions ADD COLUMN pinned_at TEXT;
+  `,
+
+  /**
+   * 记录该条助手消息是否被用户手动中断。
+   * 中断后的半截内容仍然保存，但界面要显示「已停止生成」。
+   */
+  4: `
+    ALTER TABLE messages ADD COLUMN stopped INTEGER NOT NULL DEFAULT 0;
   `
 }

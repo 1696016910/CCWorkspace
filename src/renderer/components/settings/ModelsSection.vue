@@ -66,13 +66,13 @@ onMounted(load)
 <style scoped>
 .model-input {
   width: 220px;
-  height: 27px;
+  height: 34px;
   padding: 0 9px;
   border: 1px solid var(--line-3);
   border-radius: var(--r);
   background: var(--surface-2);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--t1);
 }
 

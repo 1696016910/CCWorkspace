@@ -95,7 +95,7 @@ onUnmounted(() => window.removeEventListener('keydown', onEsc))
   position: fixed;
   inset: 0;
   z-index: 110;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(10, 10, 14, 0.45);
   display: grid;
   place-items: center;
 }

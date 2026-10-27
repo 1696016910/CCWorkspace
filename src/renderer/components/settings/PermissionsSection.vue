@@ -127,7 +127,7 @@ onMounted(load)
 
 <style scoped>
 .select {
-  height: 27px;
+  height: 34px;
   padding: 0 8px;
   border-radius: var(--r);
   border: 1px solid var(--line-3);

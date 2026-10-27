@@ -713,8 +713,14 @@ async function stop(): Promise<void> {
     <!-- 用户上翻阅读时出现的"回到最新"入口。
          流式回答期间也不自动把人拽回底部，交给用户自己决定。 -->
     <Transition name="jump">
-      <button v-if="current && awayFromBottom" class="jump-latest" @click="backToLatest">
-        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7" /></svg>
+      <button
+        v-if="current && awayFromBottom"
+        class="jump-latest"
+        :class="{ live: chat.streaming && chat.streamingSessionId === current?.id }"
+        @click="backToLatest"
+      >
+        <span v-if="chat.streaming && chat.streamingSessionId === current?.id" class="jd" />
+        <svg v-else viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7" /></svg>
         <span>回到最新</span>
       </button>
     </Transition>
@@ -925,14 +931,14 @@ async function stop(): Promise<void> {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin: 8px auto 10px;
+  margin: 8px auto 8px;
   max-width: min(680px, calc(100% - 48px));
-  padding: 8px 14px;
+  padding: 9px 14px;
   border: 1px solid var(--line-2);
   border-radius: 10px;
   /* 用白色卡片 + 阴影和滚动区区分开，避免看着像压在正文上 */
   background: var(--surface);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.07);
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--t2);
@@ -979,7 +985,7 @@ async function stop(): Promise<void> {
 /* 回到最新按钮 */
 .jump-latest {
   position: absolute;
-  bottom: 132px;
+  bottom: 148px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 16;
@@ -1001,6 +1007,22 @@ async function stop(): Promise<void> {
 .jump-latest:hover {
   background: var(--bg-hover);
   border-color: var(--line-3);
+}
+
+.jump-latest.live {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.jump-latest.live:hover {
+  background: var(--green-soft);
+}
+
+.jump-latest .jd {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
 }
 
 .jump-latest svg {

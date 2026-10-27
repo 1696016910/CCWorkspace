@@ -182,13 +182,13 @@ onUnmounted(() => off?.())
 <style scoped>
 .feed-input {
   width: 280px;
-  height: 27px;
+  height: 34px;
   padding: 0 9px;
   border: 1px solid var(--line-3);
   border-radius: var(--r);
   background: var(--surface-2);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--t1);
 }
 

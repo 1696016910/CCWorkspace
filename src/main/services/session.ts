@@ -27,6 +27,7 @@ interface MessageRow {
   content: string
   tools: string | null
   created_at: string
+  stopped?: number
 }
 
 function toSummary(row: SessionRow): SessionSummary {
@@ -203,7 +204,7 @@ export function duplicateSession(id: string): SessionSummary {
     ).run(newId, src.workspace_id, title, autoTitle, now, now)
 
     const messages = db
-      .prepare('SELECT id, role, content, tools, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC')
+      .prepare('SELECT id, role, content, tools, created_at, stopped FROM messages WHERE session_id = ? ORDER BY created_at ASC')
       .all(id) as unknown as MessageRow[]
     const insert = db.prepare(
       'INSERT INTO messages(id, session_id, role, content, tools, created_at) VALUES(?, ?, ?, ?, ?, ?)'
@@ -256,7 +257,7 @@ export function listMessages(sessionId: string, limit?: number): ChatMessage[] {
   if (n <= 0) {
     const rows = db
       .prepare(
-        'SELECT id, role, content, tools, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC'
+        'SELECT id, role, content, tools, created_at, stopped FROM messages WHERE session_id = ? ORDER BY created_at ASC'
       )
       .all(sessionId) as unknown as MessageRow[]
     return rows.map(toChatMessage)
@@ -265,7 +266,7 @@ export function listMessages(sessionId: string, limit?: number): ChatMessage[] {
   // 分页：先取最近 N 条，再反转为时间正序
   const rows = db
     .prepare(
-      `SELECT id, role, content, tools, created_at FROM messages
+      `SELECT id, role, content, tools, created_at, stopped FROM messages
         WHERE session_id = ? ORDER BY created_at DESC LIMIT ?`
     )
     .all(sessionId, n) as unknown as MessageRow[]
@@ -278,7 +279,8 @@ function toChatMessage(r: MessageRow): ChatMessage {
     role: r.role === 'assistant' ? 'assistant' : 'user',
     text: r.content,
     tools: parseTools(r.tools),
-    timestamp: r.created_at
+    timestamp: r.created_at,
+    stopped: r.stopped === 1
   }
 }
 
@@ -295,7 +297,8 @@ export function appendMessage(
   sessionId: string,
   role: 'user' | 'assistant',
   content: string,
-  tools?: ChatMessage['tools']
+  tools?: ChatMessage['tools'],
+  stopped = false
 ): ChatMessage {
   const db = getDb()
   const now = new Date().toISOString()
@@ -311,8 +314,8 @@ export function appendMessage(
   if (target.deleted_at) throw new Error('会话已被删除，消息未保存')
 
   db.prepare(
-    'INSERT INTO messages(id, session_id, role, content, tools, created_at) VALUES(?, ?, ?, ?, ?, ?)'
-  ).run(id, sessionId, role, content, tools ? JSON.stringify(tools) : null, now)
+    'INSERT INTO messages(id, session_id, role, content, tools, created_at, stopped) VALUES(?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, sessionId, role, content, tools ? JSON.stringify(tools) : null, now, stopped ? 1 : 0)
 
   db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(now, sessionId)
 
@@ -326,7 +329,7 @@ export function appendMessage(
     }
   }
 
-  return { id, role, text: content, tools, timestamp: now }
+  return { id, role, text: content, tools, timestamp: now, stopped }
 }
 
 /** 取得会话绑定的 Claude CLI 会话 id（用于 resume 续接上下文） */

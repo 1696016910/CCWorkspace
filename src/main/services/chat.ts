@@ -497,7 +497,8 @@ export async function send(
       sessionId,
       'assistant',
       acc || '（已停止）',
-      tools.length ? tools : undefined
+      tools.length ? tools : undefined,
+      aborted
     )
   } catch (e) {
     // 写到一半会话被删了：内容已在界面显示完，告诉用户没能保存

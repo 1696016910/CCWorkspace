@@ -106,7 +106,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: rgba(20, 20, 24, 0.32);
+  background: rgba(10, 10, 14, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;

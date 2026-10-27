@@ -11,6 +11,8 @@
   --danger-soft: #fbeaea;
   --danger-line: #f2dedd;
   --danger-t: #a33c34;   /* 5.9 on #fdf5f5 */
+  --warn-bg: #fdf8ee;
+  --warn-t: #8a6420;
   --success-bg: #f2f8f4;
 
   --line: #e6e6e8;
@@ -351,6 +353,8 @@ textarea {
   --danger-soft: #332424;
   --danger-line: #442e2e;
   --danger-t: #e8a9a4;   /* 8.17 on #2a1e1e */
+  --warn-bg: #2b2418;
+  --warn-t: #d9b56a;
   --success-bg: #1f2b24;
 
   --line: #2a2a30;

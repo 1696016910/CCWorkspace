@@ -102,6 +102,11 @@ function openFile(path: string): void {
       <!-- eslint-disable-next-line vue/no-v-html -- 已经过 DOMPurify 净化 -->
       <div class="ai-text md" v-html="html" @click="onBodyClick" />
 
+      <div v-if="message.stopped" class="stopped-msg">
+        <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" /></svg>
+        <span>已停止生成</span>
+      </div>
+
       <div class="msg-actions">
         <button class="act" :title="copied ? '已复制' : '复制'" @click="copyText">
           <svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M15 5.5H6A1.5 1.5 0 004.5 7v9" /></svg>
@@ -252,6 +257,27 @@ function openFile(path: string): void {
   font-family: var(--mono);
   font-size: 9.5px;
   color: var(--t4);
+}
+
+.stopped-msg {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 7px 11px;
+  border-radius: 7px;
+  background: var(--bg-soft);
+  font-size: 12px;
+  color: var(--t3);
+  width: fit-content;
+}
+
+.stopped-msg svg {
+  width: 13px;
+  height: 13px;
+  stroke: var(--t4);
+  fill: currentColor;
+  stroke-width: 1.6;
 }
 
 .tool-pill {

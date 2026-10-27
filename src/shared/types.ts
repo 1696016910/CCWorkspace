@@ -38,6 +38,8 @@ export interface ChatMessage {
   /** 该条助手消息中发生的工具调用 */
   tools?: ToolCall[]
   timestamp?: string
+  /** 该回复是被用户手动中断的 */
+  stopped?: boolean
 }
 
 export interface ToolCall {
