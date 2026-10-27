@@ -390,6 +390,9 @@ function openFile(path: string): void {
   margin: 0 0 12px;
   font-size: 12.5px;
   width: 100%;
+  /* 固定布局 + 可换行：内容长时在单元格内折行，
+     而不是把整张表撑出容器右边被裁掉 */
+  table-layout: fixed;
 }
 
 .ai-text :deep(th),
@@ -397,6 +400,8 @@ function openFile(path: string): void {
   border: 1px solid var(--line-2);
   padding: 6px 10px;
   text-align: left;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .ai-text :deep(th) {

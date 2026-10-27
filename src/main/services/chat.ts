@@ -185,6 +185,13 @@ export async function send(
   let run: ActiveRun | null = null
   /** result 事件里带回的错误，非空表示这一轮模型侧失败 */
   let runError: string | null = null
+  /**
+   * 本轮是否拿到过 SDK 给的权威上下文用量。
+   * assistant.context_usage 是 CLI 自己算的精确值（含分类明细），
+   * result 里用 usage 字段推算的只是近似值。两者都写库会让百分比来回跳，
+   * 所以权威值优先，推算值仅在没有权威值时兜底。
+   */
+  let sawAuthoritativeCtx = false
 
   try {
     const { query } = await import('@anthropic-ai/claude-agent-sdk')
@@ -299,6 +306,7 @@ export async function send(
         }
         if (withCtx.context_usage) {
           const c = withCtx.context_usage
+          sawAuthoritativeCtx = true
           ctxSnapshots.set(sessionId, {
             model: c.model ?? '',
             total_tokens: c.total_tokens ?? 0,
@@ -420,24 +428,30 @@ export async function send(
         const outputOnly = r.usage?.output_tokens ?? 0
         const used = inputOnly + cached + outputOnly
         const pct = maxTokens > 0 ? Math.min(999, Math.round((used / maxTokens) * 1000) / 10) : 0
+        const authoritative = ctxSnapshots.get(sessionId)
+        // 有权威值时沿用它的百分比，只更新 token 数用于展示成本
+        const finalPct = sawAuthoritativeCtx && authoritative ? authoritative.percentage : pct
 
         usage = {
           inputTokens: inputOnly,
           outputTokens: outputOnly,
           costUsd: r.total_cost_usd ?? 0,
-          percentage: pct
+          percentage: finalPct
         }
-        // 保留已有的分类明细：清空会让刷新判定（要求 categories 非空）
-        // 永远失败，于是每轮对话后第一次打开面板都会重跑一次 /context，
-        // 白烧 token。token 数本身每轮都更新，分类明细沿用即可。
-        ctxSnapshots.set(sessionId, {
-          model: windowModel || model || '',
-          total_tokens: used,
-          raw_max_tokens: maxTokens,
-          percentage: pct,
-          categories: ctxSnapshots.get(sessionId)?.categories ?? []
-        })
-        setContextUsage(sessionId, used, maxTokens, pct)
+
+        // 权威值已经写过库，这里不能再覆盖：两套口径混写会让
+        // 上下文百分比在 50% 和 5% 之间来回跳。只有完全没有权威值时
+        // 才用推算值兜底。
+        if (!sawAuthoritativeCtx) {
+          ctxSnapshots.set(sessionId, {
+            model: windowModel || model || '',
+            total_tokens: used,
+            raw_max_tokens: maxTokens,
+            percentage: pct,
+            categories: []
+          })
+          setContextUsage(sessionId, used, maxTokens, pct)
+        }
       }
     }
   } catch (e) {

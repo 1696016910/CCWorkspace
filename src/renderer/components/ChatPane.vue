@@ -800,7 +800,12 @@ async function stop(): Promise<void> {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 26px 0 8px;
+  /* 底部留出足够空隙：只留 8px 时最后一条消息会紧贴输入框，
+     滚动到底也看不清结尾，长回复尤其明显 */
+  padding: 26px 0 24px;
+  /* 底部渐隐，让内容在接近输入框时自然淡出，而不是被硬边切掉 */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
 }
 
 .thread-inner {
@@ -1017,6 +1022,7 @@ async function stop(): Promise<void> {
   margin: 0 0 12px;
   font-size: 12.5px;
   width: 100%;
+  table-layout: fixed;
 }
 
 .ai-text.md :deep(th),
@@ -1024,6 +1030,8 @@ async function stop(): Promise<void> {
   border: 1px solid var(--line-2);
   padding: 6px 10px;
   text-align: left;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .ai-text.md :deep(th) {
@@ -1157,7 +1165,7 @@ async function stop(): Promise<void> {
 
 .composer-wrap {
   flex: none;
-  padding: 6px 28px 16px;
+  padding: 14px 28px 16px;
   transition: background 0.15s;
 }
 
@@ -1220,18 +1228,23 @@ async function stop(): Promise<void> {
   max-width: 720px;
   margin: 0 auto;
   border: 1px solid var(--line-2);
-  border-radius: var(--r-lg);
+  border-radius: 14px;
   background: var(--surface);
   display: flex;
   flex-direction: column;
-  min-height: 96px;
+  min-height: 92px;
   position: relative;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  /* 静态时给一层极淡阴影，让输入区从背景里"浮"起来一点；
+     聚焦时再加强，形成明确的层级提示 */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .composer:focus-within {
-  border-color: #bfc3c7;
-  box-shadow: 0 0 0 3px rgba(71, 129, 92, 0.06);
+  border-color: var(--green);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--green) 14%, transparent),
+    0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .cmd-panel {
@@ -1281,10 +1294,11 @@ async function stop(): Promise<void> {
 
 .composer textarea {
   flex: 1;
-  padding: 13px 14px 2px;
+  padding: 14px 16px 4px;
   font-size: 13.5px;
-  line-height: 21px;
+  line-height: 22px;
   min-height: 48px;
+  background: transparent;
 }
 
 .composer textarea::placeholder {
@@ -1295,18 +1309,19 @@ async function stop(): Promise<void> {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 38px;
-  padding: 0 8px 0 9px;
+  gap: 6px;
+  height: 42px;
+  padding: 0 10px 0 10px;
 }
 
 .cb-btn {
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
   display: grid;
   place-items: center;
   color: var(--t3);
+  transition: background 0.13s, color 0.13s;
 }
 
 .cb-btn:hover {
@@ -1329,11 +1344,11 @@ async function stop(): Promise<void> {
   align-items: center;
   gap: 8px;
   height: 28px;
-  padding: 0 9px;
-  border-radius: 6px;
+  padding: 0 10px;
+  border-radius: 7px;
   font-size: 11.5px;
   color: var(--t3);
-  transition: background 0.12s;
+  transition: background 0.13s, color 0.13s;
 }
 
 .ctx:hover,
@@ -1367,9 +1382,9 @@ async function stop(): Promise<void> {
 }
 
 .send-btn {
-  width: 29px;
-  height: 29px;
-  border-radius: 7px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   flex: none;
   background: var(--green);
   color: #fff;
