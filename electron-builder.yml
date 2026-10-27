@@ -42,8 +42,7 @@ mac:
   # ad-hoc 签名与 hardenedRuntime 不兼容，必须关掉
   hardenedRuntime: false
 linux:
-  # AppImage 在 Ubuntu 22.04+ 默认缺 libfuse2 打不开，用 deb 兜底
-  target: [AppImage, deb]
+  target: [AppImage]
   icon: build/icon.png
   category: Development
 publish:

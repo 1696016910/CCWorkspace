@@ -76,11 +76,6 @@ jobs:
 
       - run: npm run build
 
-      # deb 打包需要 fakeroot 与 dpkg；GitHub 的 ubuntu runner 默认没装
-      - name: Install Linux packaging deps
-        if: matrix.args == '--linux'
-        run: sudo apt-get update && sudo apt-get install -y fakeroot dpkg
-
       # --publish always 上传产物与 latest*.yml 到 prepare 阶段建好的 Release
       - name: Package and publish
         run: npx electron-builder ${{ matrix.args }} --publish always
