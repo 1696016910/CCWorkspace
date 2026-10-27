@@ -224,6 +224,8 @@ watch(
   async () => {
     attachments.value = []
     ctxDetail.value = null
+    // 切换会话时输入框可能残留上一次的高度
+    if (!input.value && textarea.value) textarea.value.style.height = 'auto'
     const active = current.value
     if (active) {
       // 切换会话只读缓存；命令清单同样先读缓存，不主动触发生成
@@ -490,6 +492,8 @@ async function send(): Promise<void> {
   input.value = ''
   attachments.value = []
   cmdOpen.value = false
+  // 清空后把输入框收回默认高度，否则会留着一个被撑高的空框
+  if (textarea.value) textarea.value.style.height = 'auto'
 
   const optimistic: ChatMessage = {
     id: `local-${Date.now()}`,
@@ -1274,7 +1278,6 @@ async function stop(): Promise<void> {
   background: var(--surface);
   display: flex;
   flex-direction: column;
-  min-height: 92px;
   position: relative;
   transition: border-color 0.16s ease;
 }
@@ -1325,11 +1328,16 @@ async function stop(): Promise<void> {
 }
 
 .composer textarea {
-  flex: 1;
-  padding: 14px 16px 4px;
+  /* 不能用 flex:1：那样高度会被 flex 布局钉死，JS 写的 style.height
+     会被忽略，输入多行时文字就被裁掉。
+     这里让高度完全由 onInput 按 scrollHeight 计算。 */
+  flex: none;
+  padding: 14px 16px 8px;
   font-size: 13.5px;
   line-height: 22px;
   min-height: 48px;
+  max-height: 180px;
+  overflow-y: auto;
   background: transparent;
 }
 
