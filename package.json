@@ -1,6 +1,6 @@
 {
   "name": "claude-workbench",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Claude Code CLI 的会话与配置管理外壳",
   "author": "JianZhou",
   "repository": {
