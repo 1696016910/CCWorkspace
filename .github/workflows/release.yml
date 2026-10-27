@@ -93,8 +93,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="v$(node -p "require('./package.json').version")"
-          names=$(gh release view "$tag" --json assets -q '.assets[].name')
-          echo "$names"
+          echo "::group::release info"
+          gh release view "$tag" --json tagName,isDraft,assets | head -50 || echo "GH_VIEW_FAILED:$?"
+          echo "::endgroup::"
+          names=$(gh release view "$tag" --json assets -q '.assets[].name' || true)
+          echo "ASSET_NAMES=[$names]" 
           if [[ "${{ matrix.args }}" == "--win" ]]; then
             echo "$names" | grep -q "latest.yml" || { echo "缺少 latest.yml"; exit 1; }
             echo "$names" | grep -q -- "-x64.exe" || { echo "缺少 Windows 安装包"; exit 1; }
