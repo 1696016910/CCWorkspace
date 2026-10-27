@@ -26,3 +26,6 @@ Thumbs.db
 # 配置备份（可能含令牌）
 backups/
 
+# 免安装副本（只保留 release/ 一份产物）
+portable/
+dist-final/
