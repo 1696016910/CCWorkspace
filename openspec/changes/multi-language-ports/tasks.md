@@ -22,24 +22,24 @@
 
 ## 4. Go 版：基础设施
 
-- [ ] 4.1 初始化 `go/go.mod`（module `claude-workbench`），加入 `fyne.io/fyne/v2` 与 `modernc.org/sqlite`。验证：`go mod tidy` 成功，`go build ./...` 通过
-- [ ] 4.2 实现 `go/internal/db`：打开 SQLite、`PRAGMA integrity_check`、`foreign_keys=ON`、`busy_timeout=5000`、WAL；损坏时备份并重建；`schema_version < 4` 时报错提示先用 Node 版迁移。验证：`go test ./internal/db` 覆盖空库/损坏库/版本过旧三种情况
-- [ ] 4.3 实现 `go/internal/db` 的 workspaces / sessions / messages 三张表的读写与迁移校验。验证：单元测试断言表结构与 Node 版一致（列名、类型、索引名）
+- [x] 4.1 初始化 `go/go.mod`（module `claude-workbench`），加入 `fyne.io/fyne/v2` 与 `modernc.org/sqlite`。验证：`go mod tidy` 成功，`go build ./...` 通过
+- [x] 4.2 实现 `go/internal/db`：打开 SQLite、`PRAGMA integrity_check`、`foreign_keys=ON`、`busy_timeout=5000`、WAL；损坏时备份并重建；`schema_version < 4` 时报错提示先用 Node 版迁移。验证：`go test ./internal/db` 覆盖空库/损坏库/版本过旧三种情况
+- [x] 4.3 实现 `go/internal/db` 的 workspaces / sessions / messages 三张表的读写与迁移校验。验证：单元测试断言表结构与 Node 版一致（列名、类型、索引名）
 
 ## 5. Go 版：claude 进程
 
-- [ ] 5.1 实现 `go/internal/claude`：按协议文档构造参数、`exec.CommandContext` 启动、stdin 写入 NDJSON、stdout 逐行扫描。验证：单元测试用假命令（`echo` 脚本）验证参数拼接与行解析
-- [ ] 5.2 实现事件解析：按 `type`/`subtype` 分派，过滤 `hook_*` 与非白名单类型，过滤 `parent_tool_use_id` 非空的子代理事件。验证：单元测试喂入含 hook 事件与子代理事件的样本流，断言只产出预期事件
-- [ ] 5.3 实现 30 秒空闲超时、中断（kill 进程）、错误分类（`is_error`、超时、无 result）。验证：单元测试用 sleep 脚本验证超时；用返回 `is_error` 的假流验证错误翻译
+- [x] 5.1 实现 `go/internal/claude`：按协议文档构造参数、`exec.CommandContext` 启动、stdin 写入 NDJSON、stdout 逐行扫描。验证：单元测试用假命令（`echo` 脚本）验证参数拼接与行解析
+- [x] 5.2 实现事件解析：按 `type`/`subtype` 分派，过滤 `hook_*` 与非白名单类型，过滤 `parent_tool_use_id` 非空的子代理事件。验证：单元测试喂入含 hook 事件与子代理事件的样本流，断言只产出预期事件
+- [x] 5.3 实现 30 秒空闲超时、中断（kill 进程）、错误分类（`is_error`、超时、无 result）。验证：单元测试用 sleep 脚本验证超时；用返回 `is_error` 的假流验证错误翻译
 
 ## 6. Go 版：业务与 UI
 
-- [ ] 6.1 实现工作区与会话服务（增删改查、软删除、恢复、彻底删除、复制、置顶）。验证：`go test ./internal/services` 覆盖 CRUD 与软删除语义
-- [ ] 6.2 实现配置读写（`~/.claude/settings.json` 的 env / permissions / models，写前备份、mtime 冲突检测）。验证：单元测试覆盖畸形 JSON 拒写、备份生成、env 键名校验
-- [ ] 6.3 实现 Skill 与插件列举（扫 `~/.claude/skills`、调 `claude plugin list --json`）。验证：单元测试用临时目录造 skill 文件，断言解析结果
-- [ ] 6.4 搭建 Fyne 主窗口：侧栏（工作区树 + 会话列表）、对话区、输入框、底部按钮。加载系统中文字体（msyh → deng → simhei 回退链）。验证：启动后界面无方框乱码，侧栏可折叠，会话可切换
-- [ ] 6.5 实现对话流式渲染：逐 token 追加、工具调用折叠、停止按钮、已停止提示、上下文百分比。验证：真实发一条消息，观察逐字输出；点停止后出现「已停止生成」
-- [ ] 6.6 实现设置页六个分区（工作区/环境变量/权限/模型/Skill/插件）。验证：每个分区能读写对应配置，重启后保持
+- [x] 6.1 实现工作区与会话服务（增删改查、软删除、恢复、彻底删除、复制、置顶）。验证：`go test ./internal/services` 覆盖 CRUD 与软删除语义
+- [x] 6.2 实现配置读写（`~/.claude/settings.json` 的 env / permissions / models，写前备份、mtime 冲突检测）。验证：单元测试覆盖畸形 JSON 拒写、备份生成、env 键名校验
+- [x] 6.3 实现 Skill 与插件列举（扫 `~/.claude/skills`、调 `claude plugin list --json`）。验证：单元测试用临时目录造 skill 文件，断言解析结果
+- [x] 6.4 搭建 Fyne 主窗口：侧栏（工作区树 + 会话列表）、对话区、输入框、底部按钮。加载系统中文字体（msyh → deng → simhei 回退链）。验证：启动后界面无方框乱码，侧栏可折叠，会话可切换
+- [x] 6.5 实现对话流式渲染：逐 token 追加、工具调用折叠、停止按钮、已停止提示、上下文百分比。验证：真实发一条消息，观察逐字输出；点停止后出现「已停止生成」
+- [x] 6.6 实现设置页六个分区（工作区/环境变量/权限/模型/Skill/插件）。验证：每个分区能读写对应配置，重启后保持
 - [ ] 6.7 实现新建工作区与删除确认弹窗。验证：新建后出现在侧栏；删除会话/工作区前弹确认，确认后执行
 
 ## 7. Rust 版：基础设施
