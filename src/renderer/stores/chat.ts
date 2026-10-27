@@ -103,6 +103,7 @@ export const useChatStore = defineStore('chat', () => {
           break
         case 'done':
           pendingRuns.delete(e.runId)
+          stopping.value = false
           // 只有当前 run 才复位这些界面状态；旧 run 的收尾不打断新一轮
           if (isCurrent) {
             streaming.value = false
@@ -183,14 +184,29 @@ export const useChatStore = defineStore('chat', () => {
     unsubscribe = null
   }
 
+  /** 已请求停止，正在等主进程收尾 */
+  const stopping = ref(false)
+
   async function stop(): Promise<void> {
-    await window.api.chat.interrupt()
-    // 只复位"正在生成"的界面状态，但保留 activeRunId。
-    // 清掉它会让随后到达的 done 被当成过期事件丢弃，
-    // 结果是消息写进了库、界面却什么都不显示——用户看到的就是
-    // "发了消息没有任何回应，也没有已停止提示"。
-    streaming.value = false
-    streamingSessionId.value = null
+    // 先标记，让界面把停止按钮换成"停止中…"的静态提示。
+    // 不能立刻把 streaming 置 false：那样按钮消失、内容清空，
+    // 而 done 要几百毫秒才到，中间会出现一段空白，看着像卡死。
+    stopping.value = true
+    try {
+      await window.api.chat.interrupt()
+    } finally {
+      // 若主进程没回 done（极端情况），兜底复位，避免永远停在"停止中"
+      setTimeout(() => {
+        if (stopping.value) {
+          stopping.value = false
+          streaming.value = false
+          streamingSessionId.value = null
+        }
+      }, 3000)
+    }
+    // 注意：这里不改 streaming。
+    // 保持 true 让已有的流式内容继续显示，done 到达时才切到历史消息，
+    // 中间不会出现「按钮没了、内容也空了」的空白期。
   }
 
   /** 压缩当前会话的上下文 */
@@ -200,6 +216,7 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     streaming,
+    stopping,
     streamingSessionId,
     streamText,
     streamTools,

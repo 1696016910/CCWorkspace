@@ -684,7 +684,7 @@ async function stop(): Promise<void> {
               <span class="dots">
                 <span class="dot" /><span class="dot" /><span class="dot" />
               </span>
-              <span class="thinking-label">正在思考…</span>
+              <span class="thinking-label">{{ chat.stopping ? '正在停止…' : '正在思考…' }}</span>
             </div>
           </div>
         </div>
@@ -780,7 +780,8 @@ async function stop(): Promise<void> {
           <button
             v-if="chat.streaming && chat.streamingSessionId === current?.id"
             class="send-btn stop"
-            title="停止"
+            :disabled="chat.stopping"
+            :title="chat.stopping ? '正在停止…' : '停止'"
             @click="stop"
           >
             <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" /></svg>
@@ -1673,6 +1674,19 @@ async function stop(): Promise<void> {
 .send-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.send-btn.stop:disabled {
+  /* 点击后立刻变暗，给出"已收到指令"的即时反馈，
+     不必等主进程收尾完成 */
+  opacity: 0.5;
+  cursor: default;
+  animation: stop-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes stop-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.28; }
 }
 
 .send-btn.stop {
