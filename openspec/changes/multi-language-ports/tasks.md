@@ -16,9 +16,9 @@
 
 ## 3. 协议文档
 
-- [ ] 3.1 新增 `docs/claude-cli-protocol.md`，记录 design.md 决策 2 中的启动参数、stdin 格式、stdout 事件表、必过滤项、错误分类。验证：文档中的命令可原样复制执行并得到逐行 JSON
-- [ ] 3.2 在文档中补充实测样本：`system/init`、`stream_event`（text_delta）、`assistant`（tool_use）、`result` 各一条真实片段（脱敏）。验证：每条样本都能用 `jq` 解析成功
-- [ ] 3.3 文档补充 hook 事件污染的实际案例（SessionStart 吐出数万字符）。验证：文档说明了按 `type`/`subtype` 过滤的具体条件
+- [x] 3.1 新增 `docs/claude-cli-protocol.md`，记录 design.md 决策 2 中的启动参数、stdin 格式、stdout 事件表、必过滤项、错误分类。验证：文档中的命令可原样复制执行并得到逐行 JSON
+- [x] 3.2 在文档中补充实测样本：`system/init`、`stream_event`（text_delta）、`assistant`（tool_use）、`result` 各一条真实片段（脱敏）。验证：每条样本都能用 `jq` 解析成功
+- [x] 3.3 文档补充 hook 事件污染的实际案例（SessionStart 吐出数万字符）。验证：文档说明了按 `type`/`subtype` 过滤的具体条件
 
 ## 4. Go 版：基础设施
 
