@@ -43,22 +43,7 @@ async function removeWithDeleted(id: string): Promise<void> {
 <template>
   <div>
     <h1 class="st-h1x">工作区</h1>
-    <p class="st-subx">工作区是一个项目目录。会话都属于某个工作区；没有指定时使用默认工作区。</p>
-
-    <div class="st-blockx">
-      <h3>默认工作区</h3>
-      <div class="st-cardx">
-        <div class="st-rowx">
-          <div class="st-l">
-            <div class="st-n">新建会话时的默认归属</div>
-            <div class="st-d">未显式选择工作区时使用</div>
-          </div>
-          <div class="st-r">
-            <span class="st-sel">{{ ws.current?.name ?? '未设置' }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
+    <p class="st-subx">工作区是一个项目目录。每个工作区下可以建多个会话，会话属于它所在的工作区。</p>
 
     <div class="st-blockx">
       <h3>已添加 · {{ ws.list.length }}</h3>
@@ -69,8 +54,6 @@ async function removeWithDeleted(id: string): Promise<void> {
             <div class="st-d mono">{{ w.path }}</div>
           </div>
           <div class="st-r">
-            <span v-if="ws.defaultId === w.id" class="st-tag-default">默认</span>
-            <button v-else class="st-btn" @click="ws.setDefault(w.id)">设为默认</button>
             <button
               class="st-btn dgr"
               @click="removeWithDeleted(w.id)"

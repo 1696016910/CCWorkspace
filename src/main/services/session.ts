@@ -92,12 +92,11 @@ export function listDeletedSessions(): SessionSummary[] {
 }
 
 /**
- * 新建会话。未指定工作区时回落到默认工作区；
- * 没有任何工作区时拒绝创建，由上层提示用户。
+ * 新建会话。会话总是归属某个工作区，未指定时拒绝创建。
  */
 export function createSession(workspaceId: string | null): SessionSummary {
   const target = resolveWorkspaceId(workspaceId)
-  if (!target) throw new Error('请先添加工作区')
+  if (!target) throw new Error('请先选择一个工作区')
 
   const exists = getDb().prepare('SELECT id FROM workspaces WHERE id = ?').get(target)
   if (!exists) throw new Error('指定的工作区不存在')

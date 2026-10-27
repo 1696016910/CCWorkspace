@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>侧栏与弹窗设计稿 · Claude 工作台</title>
+<style>
+:root {
+  --bg: #fff;
+  --bg-bar: #fafafa;
+  --bg-hover: #f0f0f1;
+  --bg-soft: #f5f5f6;
+  --surface: #fff;
+  --line: #e6e6e8;
+  --line-2: #dcdcde;
+  --line-3: #d0d0d4;
+  --t1: #1f1f23;
+  --t2: #5f5f66;
+  --t3: #62626a;
+  --t4: #6f6f78;
+  --green: #47815c;
+  --green-h: #3f7553;
+  --green-soft: #edf4ef;
+  --red: #c0392b;
+  --danger-bg: #fdf5f5;
+  --danger-line: #f2dedd;
+  --warn-bg: #fdf8ee;
+  --warn: #b8860b;
+  --font: "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font);
+  background: #eef0f2;
+  color: var(--t1);
+  padding: 40px;
+  line-height: 1.5;
+}
+
+/* ── 页面结构 ── */
+.page-head {
+  max-width: 1560px;
+  margin: 0 auto 32px;
+}
+.page-head h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  margin-bottom: 8px;
+}
+.page-head p {
+  font-size: 13px;
+  color: var(--t3);
+}
+.toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+.toc a {
+  font-size: 12px;
+  color: var(--t2);
+  text-decoration: none;
+  padding: 5px 11px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 20px;
+  transition: all 0.13s;
+}
+.toc a:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+section {
+  max-width: 1560px;
+  margin: 0 auto 56px;
+  scroll-margin-top: 24px;
+}
+.sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-2);
+}
+.sec-num {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--green);
+  background: var(--green-soft);
+  padding: 2px 9px;
+  border-radius: 5px;
+}
+.sec-head h2 {
+  font-size: 17px;
+  font-weight: 600;
+}
+.sec-head .desc {
+  font-size: 12.5px;
+  color: var(--t4);
+}
+
+.row {
+  display: flex;
+  gap: 36px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.cap {
+  font-size: 12px;
+  color: var(--t4);
+  font-weight: 500;
+}
+.note {
+  font-size: 12px;
+  color: var(--t4);
+  line-height: 1.75;
+  max-width: 460px;
+}
+.note b { color: var(--t2); font-weight: 500; }
+.note code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--bg-soft);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* ══════════════════════════════════════
+   ① 侧栏
+   ══════════════════════════════════════ */
+.side-panel {
+  width: 300px;
+  background: var(--bg-bar);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+.side-top { padding: 12px; }
+.btn-new-ws {
+  width: 100%;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--green);
+  color: #fff;
+  border: none;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background 0.15s;
+}
+.btn-new-ws:hover { background: var(--green-h); }
+.btn-new-ws svg {
+  width: 15px; height: 15px;
+  stroke: currentColor; fill: none;
+  stroke-width: 2; stroke-linecap: round;
+}
+
+.ws-group { margin-bottom: 6px; }
+.ws-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  margin: 0 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.ws-head:hover { background: var(--bg-hover); }
+.ws-tri {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--t4);
+  transition: transform 0.15s;
+}
+.ws-tri svg {
+  width: 10px;
+  height: 10px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ws-tri.closed { transform: rotate(-90deg); }
+.ws-ico {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--t3);
+}
+.ws-ico svg {
+  width: 15px; height: 15px;
+  stroke: currentColor; fill: none; stroke-width: 1.6;
+}
+.ws-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--t1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-count {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--t4);
+  flex: none;
+  background: var(--bg-soft);
+  border-radius: 8px;
+  padding: 0 6px;
+}
+.ws-btns {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.row-btn {
+  width: 24px; height: 24px;
+  border: none;
+  background: none;
+  border-radius: 5px;
+  color: var(--t3);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.row-btn svg { width: 15px; height: 15px; }
+.row-btn.add svg {
+  stroke: currentColor; fill: none;
+  stroke-width: 2.2; stroke-linecap: round;
+}
+.row-btn.more svg { fill: currentColor; }
+.row-btn.add { color: var(--green); }
+.ws-head:hover .row-btn,
+.chat:hover .row-btn,
+.chat.on .row-btn { opacity: 1; }
+.row-btn.add:hover { background: var(--green-soft); }
+.row-btn.more:hover { background: var(--line); color: var(--t1); }
+
+.chat-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 1px 8px 1px 26px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.chat-item:hover { background: var(--bg-hover); }
+.chat-item.on { background: var(--green-soft); }
+.chat-item.on .chat-title { color: var(--green); font-weight: 500; }
+.chat-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--t1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-time {
+  font-size: 10.5px;
+  color: var(--t4);
+  flex: none;
+}
+.chat-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.chat-dot.live { background: var(--green); }
+.chat-dot.idle { background: var(--line-3); }
+
+/* ══════════════════════════════════════
+   ② 下拉菜单
+   ══════════════════════════════════════ */
+.menu {
+  width: 190px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  padding: 5px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  font-family: var(--font);
+  font-size: 12.5px;
+  color: var(--t1);
+  cursor: pointer;
+  text-align: left;
+}
+.menu-item:hover { background: var(--bg-hover); }
+.menu-item svg {
+  width: 14px; height: 14px;
+  stroke: var(--t3); fill: none;
+  stroke-width: 1.7;
+  flex: none;
+}
+.menu-item.danger { color: var(--red); }
+.menu-item.danger svg { stroke: var(--red); }
+.menu-item.danger:hover { background: var(--danger-bg); }
+.menu-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 6px;
+}
+
+/* ══════════════════════════════════════
+   ③ 弹窗通用
+   ══════════════════════════════════════ */
+.dialog-stage {
+  background: rgba(30, 30, 36, 0.32);
+  border-radius: 14px;
+  padding: 36px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dialog {
+  width: 460px;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+.dialog-head { padding: 24px 24px 0; }
+.dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--t1);
+  letter-spacing: -0.1px;
+}
+.dialog-sub {
+  font-size: 12.5px;
+  color: var(--t4);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+.dialog-body { padding: 20px 24px 24px; }
+
+.field { margin-bottom: 20px; }
+.field:last-child { margin-bottom: 0; }
+.field-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t2);
+  margin-bottom: 8px;
+}
+.input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--t1);
+  transition: border-color 0.15s;
+}
+.input::placeholder { color: #a8a8b0; }
+.input:focus { outline: none; border-color: var(--green); }
+.input.readonly {
+  background: var(--bg-soft);
+  color: var(--t2);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  cursor: default;
+}
+.input.readonly:focus { border-color: var(--line-2); }
+
+.path-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.path-row .input { flex: 1; min-width: 0; }
+.btn-pick {
+  flex: none;
+  height: 40px;
+  padding: 0 18px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--t1);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn-pick:hover { background: var(--bg-hover); border-color: var(--line-3); }
+.field-hint {
+  font-size: 11.5px;
+  color: var(--t4);
+  margin-top: 7px;
+}
+
+.dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 24px;
+  background: var(--bg-bar);
+  border-top: 1px solid var(--line);
+}
+.btn {
+  height: 36px;
+  padding: 0 20px;
+  border-radius: 8px;
+  font-family: var(--font);
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--t1);
+  transition: background 0.15s;
+}
+.btn:hover { background: var(--bg-hover); }
+.btn.primary {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+  font-weight: 500;
+}
+.btn.primary:hover { background: var(--green-h); }
+.btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn.danger {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+  font-weight: 500;
+}
+.btn.danger:hover { background: #a93226; }
+
+/* ══════════════════════════════════════
+   ④ 确认弹窗
+   ══════════════════════════════════════ */
+.confirm {
+  width: 420px;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+.confirm-body {
+  display: flex;
+  gap: 14px;
+  padding: 22px 24px 20px;
+}
+.confirm-icon {
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--danger-bg);
+}
+.confirm-icon svg {
+  width: 19px; height: 19px;
+  stroke: var(--red); fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.confirm-icon.warn { background: var(--warn-bg); }
+.confirm-icon.warn svg { stroke: var(--warn); }
+.confirm-text { flex: 1; min-width: 0; padding-top: 1px; }
+.confirm-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--t1);
+  margin-bottom: 7px;
+}
+.confirm-desc {
+  font-size: 12.5px;
+  color: var(--t2);
+  line-height: 1.65;
+}
+.confirm-desc strong { color: var(--t1); font-weight: 600; }
+.confirm-extra {
+  margin-top: 11px;
+  padding: 9px 11px;
+  border-radius: 7px;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-line);
+  font-size: 11.5px;
+  color: var(--red);
+  line-height: 1.6;
+}
+.confirm-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 24px;
+  background: var(--bg-bar);
+  border-top: 1px solid var(--line);
+}
+
+
+/* ══════════════════════════════════════
+   ⑨ 侧栏底部按钮
+   ══════════════════════════════════════ */
+.side-foot {
+  margin-top: auto;
+  padding: 8px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.foot-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+  border: none;
+  background: none;
+  border-radius: 7px;
+  font-family: var(--font);
+  font-size: 12.5px;
+  color: var(--t2);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+.foot-btn:hover {
+  background: var(--bg-hover);
+  color: var(--t1);
+}
+.foot-btn svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.foot-btn .fb-badge {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--t4);
+  background: var(--bg-soft);
+  border-radius: 8px;
+  padding: 0 6px;
+  line-height: 16px;
+}
+
+/* 版本号 / 状态行 */
+.foot-meta {
+  padding: 6px 9px 2px;
+  font-size: 10.5px;
+  color: var(--t4);
+  font-family: var(--mono);
+}
+
+/* ══════════════════════════════════════
+   规格标注
+   ══════════════════════════════════════ */
+.spec-table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+  background: var(--surface);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  min-width: 380px;
+}
+.spec-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 11.5px;
+  color: var(--t4);
+  padding: 10px 16px;
+  background: var(--bg-bar);
+  border-bottom: 1px solid var(--line);
+}
+.spec-table td {
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--t2);
+}
+.spec-table tr:last-child td { border-bottom: none; }
+.spec-table td:first-child { color: var(--t1); }
+.spec-table code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--green);
+  background: var(--green-soft);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.guide-box {
+  position: relative;
+}
+.guide-box .vline {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 1px;
+  background: #e85d5d;
+  opacity: 0.55;
+  pointer-events: none;
+}
+.guide-box .hline {
+  position: absolute;
+  left: 0; right: 0;
+  height: 1px;
+  background: #5d8ee8;
+  opacity: 0.55;
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>侧栏与弹窗设计稿</h1>
+  <p>Claude 工作台 · 2026-10-27 · 交互与视觉规格，供实现参考</p>
+  <div class="toc">
+    <a href="#s1">① 侧栏结构</a>
+    <a href="#s2">② 工作区菜单</a>
+    <a href="#s3">③ 会话菜单</a>
+    <a href="#s4">④ 新建工作区</a>
+    <a href="#s5">⑤ 删除工作区</a>
+    <a href="#s6">⑥ 删除会话</a>
+    <a href="#s7">⑦ 彻底删除</a>
+    <a href="#s9">⑨ 侧栏底部</a>
+    <a href="#s8">规格汇总</a>
+  </div>
+</div>
+
+<!-- ═══════════ ① 侧栏 ═══════════ -->
+<section id="s1">
+  <div class="sec-head">
+    <span class="sec-num">①</span>
+    <h2>侧栏结构</h2>
+    <span class="desc">新建会话移入工作区行内；不显示路径</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="cap">默认态</div>
+      <div class="side-panel">
+        <div class="side-top">
+          <button class="btn-new-ws">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            新建工作区
+          </button>
+        </div>
+
+        <div class="ws-group">
+          <div class="ws-head">
+            <span class="ws-tri"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="ws-ico"><svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/></svg></span>
+            <span class="ws-name">CCWorkspace</span>
+            <span class="ws-count">3</span>
+            <span class="ws-btns">
+              <button class="row-btn add" title="新建会话">
+                <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+              <button class="row-btn more" title="更多">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+              </button>
+            </span>
+          </div>
+
+          <div class="chat-item on">
+            <span class="chat-title">测试1</span>
+            <span class="chat-time">5分钟前</span>
+            <button class="row-btn more"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg></button>
+            <span class="chat-dot idle"></span>
+          </div>
+          <div class="chat-item">
+            <span class="chat-title">把订单接口改成幂等，顺便补重试</span>
+            <span class="chat-time">2小时前</span>
+            <button class="row-btn more"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg></button>
+            <span class="chat-dot live"></span>
+          </div>
+          <div class="chat-item">
+            <span class="chat-title">调研 Rust 的异步运行时</span>
+            <span class="chat-time">昨天</span>
+            <button class="row-btn more"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg></button>
+            <span class="chat-dot idle"></span>
+          </div>
+        </div>
+
+        <div class="ws-group">
+          <div class="ws-head">
+            <span class="ws-tri closed"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="ws-ico"><svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/></svg></span>
+            <span class="ws-name">Notes</span>
+            <span class="ws-count">0</span>
+            <span class="ws-btns">
+              <button class="row-btn add" title="新建会话">
+                <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+              <button class="row-btn more" title="更多">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+              </button>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="cap">说明</div>
+      <p class="note">
+        <b>工作区行</b>末尾两个按钮：<br>
+        · <b style="color:#47815c">＋</b> 在该工作区新建会话（绿色，强调）<br>
+        · <b>⋯</b> 更多菜单<br>
+        两者默认透明，鼠标移到该行才显现，不占视觉重量。
+      </p>
+      <p class="note">
+        <b>不显示路径</b>：工作区名过长时省略，悬停通过 <code>title</code> 查看完整路径。<br>
+        <b>会话行</b>右侧同样有 <b>⋯</b> 菜单，绿点表示正在生成回复。
+      </p>
+      <p class="note">
+        <b>新建会话入口变化</b>：从顶部按钮移到工作区行内，避免"不知道建在哪个工作区"。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ ②③ 菜单 ═══════════ -->
+<section id="s2">
+  <div class="sec-head">
+    <span class="sec-num">②③</span>
+    <h2>下拉菜单</h2>
+    <span class="desc">工作区与会话各自的操作集合</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="cap">工作区「⋯」</div>
+      <div class="menu">
+        <button class="menu-item"><svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>重命名</button>
+        <button class="menu-item"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>详情</button>
+        <button class="menu-item"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>置顶</button>
+        <div class="menu-sep"></div>
+        <button class="menu-item danger"><svg viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13"/></svg>删除工作区</button>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="cap">会话「⋯」</div>
+      <div class="menu">
+        <button class="menu-item"><svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>重命名</button>
+        <button class="menu-item"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>置顶</button>
+        <button class="menu-item"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M15 5.5H6A1.5 1.5 0 004.5 7v9"/></svg>复制会话</button>
+        <button class="menu-item"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>详情</button>
+        <div class="menu-sep"></div>
+        <button class="menu-item danger"><svg viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13"/></svg>删除会话</button>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="cap">说明</div>
+      <p class="note">
+        <b>分组规则</b>：常规操作在前，破坏性操作在最后，用分隔线隔开并标红。
+      </p>
+      <p class="note">
+        <b>菜单尺寸</b>：宽 190px，圆角 9px，内边距 5px，<br>
+        菜单项高 30px，图标 14px，间距 9px。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ ④ 新建工作区 ═══════════ -->
+<section id="s4">
+  <div class="sec-head">
+    <span class="sec-num">④</span>
+    <h2>新建工作区</h2>
+    <span class="desc">选目录 → 填名称 → 创建</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="cap">已填完</div>
+      <div class="dialog">
+        <div class="dialog-head">
+          <div class="dialog-title">新建工作区</div>
+          <div class="dialog-sub">选择一个项目目录，并给它起个名字</div>
+        </div>
+        <div class="dialog-body">
+          <div class="field">
+            <label class="field-label">项目目录</label>
+            <div class="path-row">
+              <input class="input readonly" value="D:\Project\AI\CCWorkspace" readonly />
+              <button class="btn-pick">选择</button>
+            </div>
+            <div class="field-hint">选好后会自动填入名称，你也可以修改</div>
+          </div>
+          <div class="field">
+            <label class="field-label">工作区名称</label>
+            <input class="input" value="CCWorkspace" placeholder="给这个工作区起个名字" />
+          </div>
+        </div>
+        <div class="dialog-foot">
+          <button class="btn">取消</button>
+          <button class="btn primary">创建</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="cap">未选目录（创建禁用）</div>
+      <div class="dialog">
+        <div class="dialog-head">
+          <div class="dialog-title">新建工作区</div>
+          <div class="dialog-sub">选择一个项目目录，并给它起个名字</div>
+        </div>
+        <div class="dialog-body">
+          <div class="field">
+            <label class="field-label">项目目录</label>
+            <div class="path-row">
+              <input class="input readonly" placeholder="尚未选择目录" readonly />
+              <button class="btn-pick">选择</button>
+            </div>
+            <div class="field-hint">选好后会自动填入名称，你也可以修改</div>
+          </div>
+          <div class="field">
+            <label class="field-label">工作区名称</label>
+            <input class="input" placeholder="给这个工作区起个名字" />
+          </div>
+        </div>
+        <div class="dialog-foot">
+          <button class="btn">取消</button>
+          <button class="btn primary" disabled>创建</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="cap">对齐标注</div>
+      <div class="dialog guide-box">
+        <div class="vline" style="left:24px"></div>
+        <div class="vline" style="right:24px"></div>
+        <div class="hline" style="top:72px"></div>
+        <div class="dialog-head">
+          <div class="dialog-title">新建工作区</div>
+          <div class="dialog-sub">选择一个项目目录，并给它起个名字</div>
+        </div>
+        <div class="dialog-body">
+          <div class="field">
+            <label class="field-label">项目目录</label>
+            <div class="path-row">
+              <input class="input readonly" value="D:\Project\AI\CCWorkspace" readonly />
+              <button class="btn-pick">选择</button>
+            </div>
+            <div class="field-hint">选好后会自动填入名称，你也可以修改</div>
+          </div>
+          <div class="field">
+            <label class="field-label">工作区名称</label>
+            <input class="input" value="CCWorkspace" />
+          </div>
+        </div>
+        <div class="dialog-foot">
+          <button class="btn">取消</button>
+          <button class="btn primary">创建</button>
+        </div>
+      </div>
+      <p class="note">
+        <span style="color:#e85d5d">红线</span>：左右内边距 24px，标题/标签/输入框左边缘统一对齐。<br>
+        <span style="color:#5d8ee8">蓝线</span>：标题区与表单区之间 20px。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ ⑤⑥⑦ 确认弹窗 ═══════════ -->
+<section id="s5">
+  <div class="sec-head">
+    <span class="sec-num">⑤</span>
+    <h2>删除工作区</h2>
+    <span class="desc">不可恢复 · 红色危险样式</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="dialog-stage">
+        <div class="confirm">
+          <div class="confirm-body">
+            <div class="confirm-icon">
+              <svg viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13"/><path d="M10.5 10v6M13.5 10v6"/></svg>
+            </div>
+            <div class="confirm-text">
+              <div class="confirm-title">删除工作区「CCWorkspace」？</div>
+              <div class="confirm-desc">
+                将同时删除该工作区下的 <strong>3 个会话</strong> 及其全部消息。磁盘上的项目目录不会被删除。
+              </div>
+              <div class="confirm-extra">
+                此外，回收站里还有 2 个属于该工作区的会话会被一并永久删除。
+              </div>
+            </div>
+          </div>
+          <div class="confirm-foot">
+            <button class="btn">取消</button>
+            <button class="btn danger">删除</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="cap">要点</div>
+      <p class="note">
+        · 只删应用内记录，<b>磁盘目录不动</b>——必须在文案里说清，否则用户不敢点。<br>
+        · 连带会话数量写在正文里，回收站里的会话单独用红框补充警告。<br>
+        · 确认按钮文案「删除」，红色，与取消有明显区别。
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="s6">
+  <div class="sec-head">
+    <span class="sec-num">⑥</span>
+    <h2>删除会话</h2>
+    <span class="desc">软删除 · 黄色可恢复样式</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="dialog-stage">
+        <div class="confirm">
+          <div class="confirm-body">
+            <div class="confirm-icon warn">
+              <svg viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13"/></svg>
+            </div>
+            <div class="confirm-text">
+              <div class="confirm-title">删除会话「测试1」？</div>
+              <div class="confirm-desc">
+                会话将移到回收站，可以随时恢复。若该会话正在生成回复，会先停止。
+              </div>
+            </div>
+          </div>
+          <div class="confirm-foot">
+            <button class="btn">取消</button>
+            <button class="btn primary">移到回收站</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="cap">要点</div>
+      <p class="note">
+        · 可恢复的操作<b>不用红色</b>，否则用户每次删会话都有压力。<br>
+        · 按钮文案用「移到回收站」而不是「确定」，动作明确。<br>
+        · 说明里提到「会先停止生成」，避免用户以为删了还在偷偷跑。
+      </p>
+      <p class="note">
+        <b>可选</b>：删除后 toast 提示「已移到回收站」，带「撤销」按钮。
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="s7">
+  <div class="sec-head">
+    <span class="sec-num">⑦</span>
+    <h2>彻底删除（回收站内）</h2>
+    <span class="desc">不可恢复 · 红色危险样式</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="dialog-stage">
+        <div class="confirm">
+          <div class="confirm-body">
+            <div class="confirm-icon">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16v.01"/></svg>
+            </div>
+            <div class="confirm-text">
+              <div class="confirm-title">彻底删除？</div>
+              <div class="confirm-desc">
+                该会话及其全部消息将被永久删除，<strong>无法恢复</strong>。
+              </div>
+            </div>
+          </div>
+          <div class="confirm-foot">
+            <button class="btn">取消</button>
+            <button class="btn danger">永久删除</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="cap">要点</div>
+      <p class="note">
+        · 标题用「彻底删除？」而不是「确定删除？」，强调不可逆。<br>
+        · 按钮文案「永久删除」，与上一层的「移到回收站」形成对比。
+      </p>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════ ⑨ 侧栏底部 ═══════════ -->
+<section id="s9">
+  <div class="sec-head">
+    <span class="sec-num">⑨</span>
+    <h2>侧栏底部按钮</h2>
+    <span class="desc">主题切换 / 回收站 / 设置</span>
+  </div>
+  <div class="row">
+
+    <div class="col">
+      <div class="cap">侧栏底部</div>
+      <div class="side-panel" style="display:flex;flex-direction:column;height:420px">
+        <div class="side-top">
+          <button class="btn-new-ws">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            新建工作区
+          </button>
+        </div>
+        <div class="ws-group">
+          <div class="ws-head">
+            <span class="ws-tri"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="ws-ico"><svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/></svg></span>
+            <span class="ws-name">CCWorkspace</span>
+            <span class="ws-count">3</span>
+          </div>
+          <div class="chat-item on">
+            <span class="chat-title">测试1</span>
+            <span class="chat-time">5分钟前</span>
+            <span class="chat-dot idle"></span>
+          </div>
+        </div>
+
+        <div class="side-foot">
+          <button class="foot-btn">
+            <svg viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 019.5 4 8.5 8.5 0 1020 14.5z"/></svg>
+            暗色模式
+          </button>
+          <button class="foot-btn">
+            <svg viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13"/></svg>
+            回收站
+            <span class="fb-badge">2</span>
+          </button>
+          <button class="foot-btn">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M5.8 5.8l1.6 1.6M16.6 16.6l1.6 1.6M18.2 5.8l-1.6 1.6M7.4 16.6l-1.6 1.6"/></svg>
+            设置
+          </button>
+          <div class="foot-meta">v0.2.1</div>
+        </div>
+      </div>
+    </div>
+
+
+  </div>
+
+  <div class="row" style="margin-top:24px">
+    <div class="col">
+      <div class="cap">规格</div>
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>按钮高度</td><td><code>34px</code></td></tr>
+        <tr><td>按钮圆角</td><td><code>7px</code></td></tr>
+        <tr><td>左右内边距</td><td><code>0 9px</code></td></tr>
+        <tr><td>图标尺寸</td><td><code>15x15</code></td></tr>
+        <tr><td>图标与文字间距</td><td><code>9px</code></td></tr>
+        <tr><td>字号</td><td><code>12.5px</code></td></tr>
+        <tr><td>按钮间距</td><td><code>2px</code></td></tr>
+        <tr><td>容器内边距</td><td><code>8px</code></td></tr>
+      </table>
+    </div>
+
+    <div class="col">
+      <div class="cap">改动说明</div>
+      <p class="note">
+        <b>高度 34px</b>：原来 29px 偏窄，点击目标小。<br>
+        <b>图标 15px</b>：原来 14px，与文字比例更协调。<br>
+        <b>间距 9px</b>：原来 7px，图标与文字不再挤在一起。
+      </p>
+      <p class="note">
+        <b>回收站加数量徽章</b>：有内容时显示数字，一眼知道回收站里有没有东西。<br>
+        <b>版本号</b>：放在最下方，小字灰色，不抢注意力。
+      </p>
+      <p class="note">
+        <b>为什么用带文字的形式</b>：三个功能彼此独立，文字更易识别；<br>
+        纯图标需要记忆含义，对不常用的「回收站」不友好。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 规格汇总 ═══════════ -->
+<section id="s8">
+  <div class="sec-head">
+    <span class="sec-num">⑧</span>
+    <h2>规格汇总</h2>
+    <span class="desc">实现时直接取用</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="cap">弹窗</div>
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>宽度</td><td><code>460px</code>（表单）/ <code>420px</code>（确认）</td></tr>
+        <tr><td>圆角</td><td><code>14px</code></td></tr>
+        <tr><td>左右内边距</td><td><code>24px</code></td></tr>
+        <tr><td>标题字号</td><td><code>16px / 600</code></td></tr>
+        <tr><td>副标题</td><td><code>12.5px / --t4</code></td></tr>
+        <tr><td>标题区下间距</td><td><code>20px</code></td></tr>
+        <tr><td>字段间距</td><td><code>20px</code></td></tr>
+        <tr><td>底部栏</td><td>背景 <code>--bg-bar</code>，上边框 <code>--line</code></td></tr>
+      </table>
+    </div>
+
+    <div class="col">
+      <div class="cap">表单控件</div>
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>输入框高度</td><td><code>40px</code></td></tr>
+        <tr><td>输入框圆角</td><td><code>8px</code></td></tr>
+        <tr><td>输入框内边距</td><td><code>0 12px</code></td></tr>
+        <tr><td>标签字号</td><td><code>12.5px / 500 / --t2</code></td></tr>
+        <tr><td>标签下间距</td><td><code>8px</code></td></tr>
+        <tr><td>按钮高度</td><td><code>40px</code>（与输入框同高）</td></tr>
+        <tr><td>按钮内边距</td><td><code>0 18px</code></td></tr>
+        <tr><td>按钮与输入框间距</td><td><code>8px</code></td></tr>
+      </table>
+    </div>
+
+    <div class="col">
+      <div class="cap">侧栏</div>
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>宽度</td><td><code>300px</code>（现有 246px 可调）</td></tr>
+        <tr><td>工作区行高</td><td><code>34px</code></td></tr>
+        <tr><td>会话行高</td><td><code>30px</code></td></tr>
+        <tr><td>行内图标按钮</td><td><code>24 × 24</code>，圆角 <code>5px</code></td></tr>
+        <tr><td>图标按钮透明度</td><td>默认 <code>0</code>，行 hover 时 <code>1</code></td></tr>
+        <tr><td>会话缩进</td><td><code>26px</code></td></tr>
+        <tr><td>菜单宽</td><td><code>190px</code>，圆角 <code>9px</code></td></tr>
+      </table>
+    </div>
+
+    <div class="col">
+      <div class="cap">语义色</div>
+      <table class="spec-table">
+        <tr><th>场景</th><th>图标底 / 按钮</th></tr>
+        <tr><td>不可恢复操作</td><td>红 <code>--danger-bg</code> / <code>--red</code></td></tr>
+        <tr><td>可恢复操作</td><td>黄 <code>--warn-bg</code> / 绿 <code>--green</code></td></tr>
+        <tr><td>创建类操作</td><td>无图标 / 绿 <code>--green</code></td></tr>
+        <tr><td>禁用态</td><td><code>opacity: 0.4</code></td></tr>
+      </table>
+      <p class="note" style="margin-top:12px">
+        <b>按钮文案原则</b>：写动作，不写「确定」。<br>
+        「移到回收站」「永久删除」「创建」都比「确定」清楚。
+      </p>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

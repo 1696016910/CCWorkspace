@@ -4,19 +4,11 @@ import type { Workspace } from '@shared/types'
 
 export const useWorkspaceStore = defineStore('workspace', () => {
   const list = ref<Workspace[]>([])
-  const defaultId = ref<string | null>(null)
   const collapsed = ref<Set<string>>(new Set())
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  const current = computed(() => {
-    const def = defaultId.value
-    if (def) {
-      const found = list.value.find((w) => w.id === def)
-      if (found) return found
-    }
-    return list.value[0] ?? null
-  })
+  const current = computed(() => list.value[0] ?? null)
 
   const titlePath = computed(() => {
     const w = current.value
@@ -28,12 +20,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     loading.value = true
     error.value = null
     try {
-      const [workspaces, def] = await Promise.all([
-        window.api.workspace.list(),
-        window.api.workspace.getDefault()
-      ])
-      list.value = workspaces
-      defaultId.value = def
+      list.value = await window.api.workspace.list()
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
     } finally {
@@ -72,13 +59,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const ok = await window.api.dialog.confirm(detail)
     if (!ok) return false
     list.value = await window.api.workspace.remove(id)
-    defaultId.value = await window.api.workspace.getDefault()
     return true
-  }
-
-  async function setDefault(id: string | null): Promise<void> {
-    await window.api.workspace.setDefault(id)
-    defaultId.value = id
   }
 
   async function rename(id: string, name: string): Promise<void> {
@@ -98,7 +79,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   return {
     list,
-    defaultId,
     current,
     titlePath,
     loading,
@@ -108,7 +88,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     pickAndAdd,
     remove,
     rename,
-    setDefault,
     toggle,
     isCollapsed
   }

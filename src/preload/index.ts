@@ -67,8 +67,6 @@ const api = {
     list: (): Promise<Workspace[]> => unwrap(ipcRenderer.invoke('workspace:list')),
     add: (dir: string): Promise<Workspace[]> => unwrap(ipcRenderer.invoke('workspace:add', dir)),
     remove: (id: string): Promise<Workspace[]> => unwrap(ipcRenderer.invoke('workspace:remove', id)),
-    getDefault: (): Promise<string | null> => unwrap(ipcRenderer.invoke('workspace:getDefault')),
-    setDefault: (id: string | null): Promise<void> => unwrap(ipcRenderer.invoke('workspace:setDefault', id)),
     rename: (id: string, name: string): Promise<Workspace[]> =>
       unwrap(ipcRenderer.invoke('workspace:rename', id, name)),
     pick: (): Promise<string | null> => unwrap(ipcRenderer.invoke('workspace:pick'))

@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设置页设计稿 · Claude 工作台</title>
+<style>
+:root {
+  --bg: #fff;
+  --bg-bar: #fafafa;
+  --bg-hover: #f0f0f1;
+  --bg-soft: #f5f5f6;
+  --bg-select: #e7e7e9;
+  --surface: #fff;
+  --line: #e6e6e8;
+  --line-2: #dcdcde;
+  --line-3: #d0d0d4;
+  --t1: #1f1f23;
+  --t2: #5f5f66;
+  --t3: #62626a;
+  --t4: #6f6f78;
+  --green: #47815c;
+  --green-h: #3f7553;
+  --green-soft: #edf4ef;
+  --green-t: #2f6b49;
+  --red: #c0392b;
+  --danger-bg: #fdf5f5;
+  --danger-line: #f2dedd;
+  --font: "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font); background: #eef0f2; color: var(--t1);
+  padding: 36px; line-height: 1.5;
+}
+.page-head { max-width: 1500px; margin: 0 auto 28px; }
+.page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.2px; margin-bottom: 8px; }
+.page-head p { font-size: 13px; color: var(--t3); }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.toc a {
+  font-size: 12px; color: var(--t2); text-decoration: none;
+  padding: 5px 11px; background: var(--surface);
+  border: 1px solid var(--line-2); border-radius: 20px;
+}
+.toc a:hover { border-color: var(--green); color: var(--green); }
+
+section { max-width: 1500px; margin: 0 auto 48px; scroll-margin-top: 24px; }
+.sec-head {
+  display: flex; align-items: baseline; gap: 12px;
+  margin-bottom: 16px; padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-2);
+}
+.sec-num {
+  font-size: 12px; font-weight: 600; color: var(--green);
+  background: var(--green-soft); padding: 2px 9px; border-radius: 5px;
+}
+.sec-head h2 { font-size: 17px; font-weight: 600; }
+.sec-head .desc { font-size: 12.5px; color: var(--t4); }
+
+.row { display: flex; gap: 32px; flex-wrap: wrap; align-items: flex-start; }
+.col { display: flex; flex-direction: column; gap: 12px; }
+.cap { font-size: 12px; color: var(--t4); font-weight: 500; }
+.note { font-size: 12px; color: var(--t4); line-height: 1.75; max-width: 440px; }
+.note b { color: var(--t2); font-weight: 500; }
+.note code {
+  font-family: var(--mono); font-size: 11px;
+  background: var(--bg-soft); padding: 1px 5px; border-radius: 3px;
+}
+
+/* ══════════════════════════════════════
+   设置页外框
+   ══════════════════════════════════════ */
+.settings {
+  width: 1100px;
+  height: 700px;
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.08);
+  display: grid;
+  grid-template-rows: 52px 1fr;
+  overflow: hidden;
+}
+
+/* 顶栏 */
+.st-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px;
+  background: var(--bg-bar);
+  border-bottom: 1px solid var(--line);
+}
+.st-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px 0 9px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--t1);
+  cursor: pointer;
+  transition: background .14s, border-color .14s;
+}
+.st-back:hover {
+  background: var(--bg-hover);
+  border-color: var(--line-3);
+}
+.st-back svg {
+  width: 15px; height: 15px;
+  stroke: currentColor; fill: none;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.st-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--t1);
+}
+.st-sp { flex: 1; }
+.st-close {
+  width: 32px; height: 32px;
+  border: none; background: none;
+  border-radius: 8px;
+  color: var(--t3);
+  cursor: pointer;
+  display: grid; place-items: center;
+  transition: background .14s, color .14s;
+}
+.st-close:hover { background: var(--bg-hover); color: var(--t1); }
+.st-close svg {
+  width: 15px; height: 15px;
+  stroke: currentColor; fill: none;
+  stroke-width: 2; stroke-linecap: round;
+}
+
+/* 主体：左导航 + 右内容 */
+.st-body {
+  display: grid;
+  grid-template-columns: 232px 1fr;
+  min-height: 0;
+}
+
+/* 左侧导航 */
+.st-nav {
+  padding: 14px 10px;
+  border-right: 1px solid var(--line);
+  background: var(--bg-bar);
+  overflow-y: auto;
+}
+.st-grp {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--t4);
+  padding: 12px 10px 6px;
+  letter-spacing: .02em;
+}
+.st-grp:first-child { padding-top: 2px; }
+.st-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: none;
+  background: none;
+  border-radius: 7px;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--t2);
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.st-item:hover { background: var(--bg-hover); color: var(--t1); }
+.st-item.on {
+  background: var(--green-soft);
+  color: var(--green-t);
+  font-weight: 500;
+}
+.st-item svg {
+  width: 15px; height: 15px;
+  flex: none;
+  stroke: currentColor; fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.st-item .badge {
+  margin-left: auto;
+  font-size: 10.5px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--bg-select);
+  color: var(--t3);
+}
+.st-item.on .badge { background: rgba(71,129,92,.14); color: var(--green-t); }
+
+/* 右侧内容 */
+.st-main {
+  overflow-y: auto;
+  min-width: 0;
+}
+.st-inner {
+  max-width: 680px;
+  padding: 28px 32px 40px;
+}
+.st-h1 {
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--t1);
+  margin-bottom: 6px;
+  letter-spacing: -0.2px;
+}
+.st-sub {
+  font-size: 12.5px;
+  color: var(--t3);
+  line-height: 1.65;
+  margin-bottom: 24px;
+}
+.st-sub code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  background: var(--bg-soft);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* 区块 */
+.block { margin-bottom: 26px; }
+.block-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t2);
+  margin-bottom: 10px;
+}
+.card {
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.rowx {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.rowx:last-child { border-bottom: none; }
+.rowx:hover { background: #fcfcfd; }
+.rl { flex: 1; min-width: 0; }
+.rn { font-size: 13px; color: var(--t1); }
+.rd {
+  font-size: 11.5px;
+  color: var(--t4);
+  margin-top: 3px;
+  line-height: 1.55;
+}
+.rd.mono { font-family: var(--mono); font-size: 11px; }
+.rr { flex: none; display: flex; align-items: center; gap: 8px; }
+
+/* 表单控件 */
+.input {
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: var(--font);
+  font-size: 12.5px;
+  color: var(--t1);
+  transition: border-color .15s;
+}
+.input:focus { outline: none; border-color: var(--green); }
+.input.mono { font-family: var(--mono); font-size: 12px; }
+
+.btn {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: var(--font);
+  font-size: 12.5px;
+  color: var(--t1);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .13s, border-color .13s;
+}
+.btn:hover { background: var(--bg-hover); border-color: var(--line-3); }
+.btn.pri {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+  font-weight: 500;
+}
+.btn.pri:hover { background: var(--green-h); }
+.btn.dgr { color: var(--red); }
+.btn.dgr:hover { background: var(--danger-bg); border-color: var(--danger-line); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* 开关 */
+.toggle {
+  width: 38px; height: 22px;
+  border-radius: 11px;
+  background: var(--line-3);
+  border: none;
+  position: relative;
+  cursor: pointer;
+  transition: background .16s;
+}
+.toggle.on { background: var(--green); }
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.18);
+  transition: transform .16s;
+}
+.toggle.on::after { transform: translateX(16px); }
+
+/* 标签 */
+.tag {
+  display: inline-flex; align-items: center;
+  height: 20px; padding: 0 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  background: var(--bg-soft);
+  color: var(--t3);
+}
+.tag.green { background: var(--green-soft); color: var(--green-t); }
+
+/* 提示条 */
+.notice {
+  display: flex; gap: 10px;
+  padding: 12px 14px;
+  border-radius: 9px;
+  background: var(--green-soft);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--green-t);
+}
+.notice svg { width: 15px; height: 15px; flex: none; margin-top: 1px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+
+/* 空状态 */
+.empty-row { padding: 24px 16px; text-align: center; font-size: 12px; color: var(--t4); }
+
+/* 添加行 */
+.add-row {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; height: 34px; margin-top: 10px;
+  border: 1px dashed var(--line-3);
+  border-radius: 9px;
+  background: transparent;
+  font-family: var(--font);
+  font-size: 12.5px;
+  color: var(--t3);
+  cursor: pointer;
+  transition: all .13s;
+}
+.add-row:hover {
+  border-color: var(--green);
+  color: var(--green);
+  background: var(--green-soft);
+  border-style: solid;
+}
+.add-row svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; }
+
+/* 保存栏 */
+.save-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.save-bar .sp { flex: 1; }
+.save-msg { font-size: 12px; color: var(--green-t); }
+.save-msg.bad { color: var(--red); }
+
+/* 规格表 */
+.spec-table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+  background: var(--surface);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  min-width: 340px;
+}
+.spec-table th {
+  text-align: left; font-weight: 500; font-size: 11.5px;
+  color: var(--t4); padding: 9px 14px;
+  background: var(--bg-bar); border-bottom: 1px solid var(--line);
+}
+.spec-table td { padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--t2); }
+.spec-table tr:last-child td { border-bottom: none; }
+.spec-table td:first-child { color: var(--t1); }
+.spec-table code {
+  font-family: var(--mono); font-size: 11px;
+  color: var(--green); background: var(--green-soft);
+  padding: 1px 4px; border-radius: 3px;
+}
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>设置页设计稿</h1>
+  <p>Claude 工作台 · 2026-10-27 · 导航结构、分区内容、表单控件</p>
+  <div class="toc">
+    <a href="#s1">① 整体布局</a>
+    <a href="#s2">② 顶栏</a>
+    <a href="#s3">③ 左侧导航</a>
+    <a href="#s4">④ 内容区示意</a>
+    <a href="#s5">⑤ 控件规格</a>
+    <a href="#s6">⑥ 规格汇总</a>
+  </div>
+</div>
+
+<!-- ① 整体 -->
+<section id="s1">
+  <div class="sec-head">
+    <span class="sec-num">①</span>
+    <h2>整体布局</h2>
+    <span class="desc">顶栏 52px + 左导航 232px + 右内容自适应</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="settings">
+        <div class="st-bar">
+          <button class="st-back">
+            <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+            返回
+          </button>
+          <span class="st-title">设置</span>
+          <span class="st-sp"></span>
+          <button class="st-close">
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+
+        <div class="st-body">
+          <nav class="st-nav">
+            <div class="st-grp">工作</div>
+            <button class="st-item on">
+              <svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/></svg>
+              工作区
+              <span class="badge">2</span>
+            </button>
+
+            <div class="st-grp">配置</div>
+            <button class="st-item">
+              <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+              环境变量
+            </button>
+            <button class="st-item">
+              <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 4.4-3.2 8.2-8 9-4.8-.8-8-4.6-8-9V7l8-4z"/></svg>
+              权限
+            </button>
+            <button class="st-item">
+              <svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 9h6M9 13h4"/></svg>
+              模型
+            </button>
+
+            <div class="st-grp">扩展</div>
+            <button class="st-item">
+              <svg viewBox="0 0 24 24"><path d="M12 3l2.5 5.5L20 11l-5.5 2.5L12 19l-2.5-5.5L4 11l5.5-2.5z"/></svg>
+              Skill
+            </button>
+            <button class="st-item">
+              <svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+              插件
+            </button>
+            <button class="st-item">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 010 18 15 15 0 010-18z"/></svg>
+              插件仓库
+            </button>
+
+            <div class="st-grp">关于</div>
+            <button class="st-item">
+              <svg viewBox="0 0 24 24"><path d="M12 18V8M8 12l4-4 4 4"/><circle cx="12" cy="12" r="9"/></svg>
+              更新
+            </button>
+          </nav>
+
+          <main class="st-main">
+            <div class="st-inner">
+              <h1 class="st-h1">工作区</h1>
+              <p class="st-sub">工作区是一个项目目录。每个工作区下可以建多个会话，会话属于它所在的工作区。</p>
+
+              <div class="block">
+                <div class="block-title">已添加 · 2</div>
+                <div class="card">
+                  <div class="rowx">
+                    <div class="rl">
+                      <div class="rn">CCWorkspace</div>
+                      <div class="rd mono">D:\Project\AI\CCWorkspace</div>
+                    </div>
+                    <div class="rr">
+                      <button class="btn dgr">移除</button>
+                    </div>
+                  </div>
+                  <div class="rowx">
+                    <div class="rl">
+                      <div class="rn">Notes</div>
+                      <div class="rd mono">C:\Users\MasterY\Downloads\tt</div>
+                    </div>
+                    <div class="rr">
+                      <button class="btn dgr">移除</button>
+                    </div>
+                  </div>
+                </div>
+                <button class="add-row">
+                  <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                  添加工作区
+                </button>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="cap">关键改动</div>
+      <p class="note">
+        <b>1. 顶栏从 36px 提到 52px</b><br>
+        原来太挤，返回按钮只有 26px 高、难点击。
+      </p>
+      <p class="note">
+        <b>2. 返回按钮改成图标 + 文字</b><br>
+        <code>‹ 返回</code> 32px 高，带边框，点击区域明显。
+      </p>
+      <p class="note">
+        <b>3. 导航项加图标</b><br>
+        每项前面 15px 图标，比纯文字更容易扫读。
+      </p>
+      <p class="note">
+        <b>4. 工作区项带数量徽章</b><br>
+        右侧显示工作区数量，一眼知道有几个。
+      </p>
+      <p class="note">
+        <b>5. 选中态用浅绿底 + 绿字</b><br>
+        原来只有浅灰底，不够明确。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ② 顶栏细节 -->
+<section id="s2">
+  <div class="sec-head">
+    <span class="sec-num">②</span>
+    <h2>顶栏</h2>
+    <span class="desc">返回 · 标题 · 关闭</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="cap">正常态</div>
+      <div style="width:700px;background:var(--bg-bar);border:1px solid var(--line-2);border-radius:10px;overflow:hidden">
+        <div class="st-bar" style="border-bottom:none">
+          <button class="st-back">
+            <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+            返回
+          </button>
+          <span class="st-title">设置</span>
+          <span class="st-sp"></span>
+          <button class="st-close">
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="cap" style="margin-top:16px">返回按钮悬停</div>
+      <div style="width:700px;background:var(--bg-bar);border:1px solid var(--line-2);border-radius:10px;overflow:hidden">
+        <div class="st-bar" style="border-bottom:none">
+          <button class="st-back" style="background:var(--bg-hover);border-color:var(--line-3)">
+            <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+            返回
+          </button>
+          <span class="st-title">设置</span>
+          <span class="st-sp"></span>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>顶栏高度</td><td><code>52px</code>（原 36px）</td></tr>
+        <tr><td>左右内边距</td><td><code>16px</code></td></tr>
+        <tr><td>返回按钮高</td><td><code>32px</code></td></tr>
+        <tr><td>返回按钮圆角</td><td><code>8px</code></td></tr>
+        <tr><td>返回按钮内边距</td><td><code>0 12px 0 9px</code></td></tr>
+        <tr><td>箭头图标</td><td><code>15x15</code>，stroke 2</td></tr>
+        <tr><td>标题字号</td><td><code>14px / 600</code></td></tr>
+        <tr><td>关闭按钮</td><td><code>32x32</code>，圆角 8px</td></tr>
+        <tr><td>元素间距</td><td><code>14px</code></td></tr>
+      </table>
+      <p class="note">
+        返回按钮用 <code>‹</code> 箭头 SVG 而不是文字 <code>←</code>，<br>
+        线条更细更精致，与整体图标风格一致。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ③ 左侧导航 -->
+<section id="s3">
+  <div class="sec-head">
+    <span class="sec-num">③</span>
+    <h2>左侧导航</h2>
+    <span class="desc">分组 + 图标 + 徽章</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div style="width:232px;height:560px;background:var(--bg-bar);border:1px solid var(--line-2);border-radius:10px;padding:14px 10px">
+        <div class="st-grp" style="padding-top:2px">工作</div>
+        <button class="st-item on">
+          <svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/></svg>
+          工作区
+          <span class="badge">2</span>
+        </button>
+
+        <div class="st-grp">配置</div>
+        <button class="st-item">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+          环境变量
+          <span class="badge">8</span>
+        </button>
+        <button class="st-item">
+          <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 4.4-3.2 8.2-8 9-4.8-.8-8-4.6-8-9V7l8-4z"/></svg>
+          权限
+        </button>
+        <button class="st-item">
+          <svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 9h6M9 13h4"/></svg>
+          模型
+        </button>
+
+        <div class="st-grp">扩展</div>
+        <button class="st-item">
+          <svg viewBox="0 0 24 24"><path d="M12 3l2.5 5.5L20 11l-5.5 2.5L12 19l-2.5-5.5L4 11l5.5-2.5z"/></svg>
+          Skill
+          <span class="badge">12</span>
+        </button>
+        <button class="st-item">
+          <svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+          插件
+          <span class="badge">5</span>
+        </button>
+        <button class="st-item">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 010 18 15 15 0 010-18z"/></svg>
+          插件仓库
+        </button>
+
+        <div class="st-grp">关于</div>
+        <button class="st-item">
+          <svg viewBox="0 0 24 24"><path d="M12 18V8M8 12l4-4 4 4"/><circle cx="12" cy="12" r="9"/></svg>
+          更新
+        </button>
+      </div>
+    </div>
+    <div class="col">
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>导航宽度</td><td><code>232px</code></td></tr>
+        <tr><td>内边距</td><td><code>14px 10px</code></td></tr>
+        <tr><td>分组标题</td><td><code>11px / 500 / --t4</code></td></tr>
+        <tr><td>分组上间距</td><td><code>12px</code></td></tr>
+        <tr><td>导航项高度</td><td><code>34px</code></td></tr>
+        <tr><td>导航项圆角</td><td><code>7px</code></td></tr>
+        <tr><td>图标</td><td><code>15x15</code>，间距 <code>10px</code></td></tr>
+        <tr><td>选中态</td><td>底 <code>--green-soft</code>，字 <code>--green-t</code></td></tr>
+        <tr><td>徽章</td><td><code>10.5px</code>，圆角 <code>8px</code></td></tr>
+      </table>
+      <p class="note">
+        <b>为什么加图标</b>：8 个分区纯文字时，找某项要逐行读；<br>
+        有图标后可以靠形状快速定位。
+      </p>
+      <p class="note">
+        <b>徽章用于计数</b>：工作区 2 个、环境变量 8 条、Skill 12 个……<br>
+        不用点进去就知道有没有内容。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ④ 内容区示意 -->
+<section id="s4">
+  <div class="sec-head">
+    <span class="sec-num">④</span>
+    <h2>内容区</h2>
+    <span class="desc">以「环境变量」为例</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div style="width:660px;background:var(--surface);border:1px solid var(--line-2);border-radius:12px;padding:28px 32px">
+        <h1 class="st-h1">环境变量</h1>
+        <p class="st-sub">写入 <code>~/.claude/settings.json</code> 的 <code>env</code> 字段，保存前会自动备份。</p>
+
+        <div class="block">
+          <div class="card">
+            <div class="rowx">
+              <div class="rl">
+                <div class="rn">ANTHROPIC_AUTH_TOKEN</div>
+                <div class="rd">认证令牌，调用 API 时使用</div>
+              </div>
+              <div class="rr">
+                <input class="input mono" style="width:260px" value="sk-ant-xxxxxxxxxxxx" />
+                <button class="btn dgr">删除</button>
+              </div>
+            </div>
+            <div class="rowx">
+              <div class="rl">
+                <div class="rn">ANTHROPIC_BASE_URL</div>
+                <div class="rd">API 地址，留空使用官方</div>
+              </div>
+              <div class="rr">
+                <input class="input mono" style="width:260px" value="https://api.anthropic.com" />
+                <button class="btn dgr">删除</button>
+              </div>
+            </div>
+            <div class="rowx">
+              <div class="rl">
+                <div class="rn">MAX_THINKING_TOKENS</div>
+                <div class="rd">思考预算</div>
+              </div>
+              <div class="rr">
+                <input class="input mono" style="width:260px" value="8000" />
+                <button class="btn dgr">删除</button>
+              </div>
+            </div>
+          </div>
+          <button class="add-row">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            添加变量
+          </button>
+        </div>
+
+        <div class="notice" style="margin-bottom:20px">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
+          <span>这些值会以明文保存在本地配置文件中，不会上传。</span>
+        </div>
+
+        <div class="save-bar">
+          <span class="sp"></span>
+          <button class="btn pri">保存</button>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>内容最大宽</td><td><code>680px</code></td></tr>
+        <tr><td>内容内边距</td><td><code>28px 32px 40px</code></td></tr>
+        <tr><td>页面标题</td><td><code>19px / 600</code></td></tr>
+        <tr><td>副标题</td><td><code>12.5px / --t3</code></td></tr>
+        <tr><td>卡片圆角</td><td><code>10px</code></td></tr>
+        <tr><td>行内边距</td><td><code>14px 16px</code></td></tr>
+        <tr><td>行标题</td><td><code>13px / --t1</code></td></tr>
+        <tr><td>行说明</td><td><code>11.5px / --t4</code></td></tr>
+        <tr><td>输入框高</td><td><code>34px</code>，圆角 <code>8px</code></td></tr>
+        <tr><td>按钮高</td><td><code>32px</code></td></tr>
+      </table>
+      <p class="note">
+        <b>与旧版差异</b>：<br>
+        · 行高从 13px 内边距增加到 14px，输入框 34px（原 27px）<br>
+        · 删除按钮改成文字「删除」，比 ✕ 图标更明确<br>
+        · 添加按钮从实线卡片改成虚线框
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ⑤ 控件 -->
+<section id="s5">
+  <div class="sec-head">
+    <span class="sec-num">⑤</span>
+    <h2>控件规格</h2>
+    <span class="desc">全站统一</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="cap">按钮</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:16px;background:var(--surface);border:1px solid var(--line-2);border-radius:10px">
+        <button class="btn">普通</button>
+        <button class="btn pri">主要</button>
+        <button class="btn dgr">危险</button>
+        <button class="btn" disabled>禁用</button>
+      </div>
+      <p class="note">
+        高 32px，圆角 8px，内边距 0 14px。<br>
+        主按钮绿底白字，危险按钮红字，禁用 45% 透明。
+      </p>
+
+      <div class="cap" style="margin-top:16px">开关</div>
+      <div style="display:flex;gap:16px;align-items:center;padding:16px;background:var(--surface);border:1px solid var(--line-2);border-radius:10px">
+        <button class="toggle"></button>
+        <button class="toggle on"></button>
+      </div>
+      <p class="note">
+        38x22px，圆角 11px，关闭灰、开启绿，滑块 18px 白圆。
+      </p>
+    </div>
+
+    <div class="col">
+      <div class="cap">输入框</div>
+      <div style="display:flex;flex-direction:column;gap:10px;padding:16px;background:var(--surface);border:1px solid var(--line-2);border-radius:10px;width:300px">
+        <input class="input" placeholder="普通输入框" />
+        <input class="input mono" placeholder="等宽输入框" />
+        <input class="input" value="聚焦态" style="border-color:var(--green)" />
+      </div>
+      <p class="note">
+        高 34px，圆角 8px，内边距 0 11px。<br>
+        聚焦只变边框颜色，不加阴影。
+      </p>
+
+      <div class="cap" style="margin-top:16px">标签</div>
+      <div style="display:flex;gap:8px;padding:16px;background:var(--surface);border:1px solid var(--line-2);border-radius:10px">
+        <span class="tag">默认</span>
+        <span class="tag green">已启用</span>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="cap">提示条</div>
+      <div style="width:340px;padding:16px;background:var(--surface);border:1px solid var(--line-2);border-radius:10px">
+        <div class="notice">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>
+          <span>这些值会以明文保存在本地配置文件中，不会上传。</span>
+        </div>
+      </div>
+      <p class="note">
+        绿色浅底 + 图标 + 文字，用于说明性提示。
+      </p>
+
+      <div class="cap" style="margin-top:16px">添加行</div>
+      <div style="width:340px;padding:16px;background:var(--surface);border:1px solid var(--line-2);border-radius:10px">
+        <button class="add-row" style="margin-top:0">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          添加变量
+        </button>
+      </div>
+      <p class="note">
+        虚线框，悬停变绿实线。比实心按钮轻，不抢主按钮的注意力。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ⑥ 规格汇总 -->
+<section id="s6">
+  <div class="sec-head">
+    <span class="sec-num">⑥</span>
+    <h2>规格汇总</h2>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="cap">布局</div>
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>顶栏高度</td><td><code>52px</code></td></tr>
+        <tr><td>导航宽度</td><td><code>232px</code></td></tr>
+        <tr><td>内容最大宽</td><td><code>680px</code></td></tr>
+        <tr><td>内容内边距</td><td><code>28px 32px 40px</code></td></tr>
+      </table>
+    </div>
+    <div class="col">
+      <div class="cap">尺寸</div>
+      <table class="spec-table">
+        <tr><th>元素</th><th>高度</th></tr>
+        <tr><td>返回按钮</td><td><code>32px</code></td></tr>
+        <tr><td>导航项</td><td><code>34px</code></td></tr>
+        <tr><td>普通按钮</td><td><code>32px</code></td></tr>
+        <tr><td>输入框</td><td><code>34px</code></td></tr>
+        <tr><td>开关</td><td><code>22px</code>（38 宽）</td></tr>
+      </table>
+    </div>
+    <div class="col">
+      <div class="cap">圆角</div>
+      <table class="spec-table">
+        <tr><th>元素</th><th>圆角</th></tr>
+        <tr><td>外框</td><td><code>14px</code></td></tr>
+        <tr><td>卡片</td><td><code>10px</code></td></tr>
+        <tr><td>按钮 / 输入框 / 导航项</td><td><code>8px / 8px / 7px</code></td></tr>
+        <tr><td>标签 / 徽章</td><td>全圆</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

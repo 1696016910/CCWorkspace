@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>对话区设计稿 · Claude 工作台</title>
+<style>
+:root {
+  --bg: #fff;
+  --bg-bar: #fafafa;
+  --bg-hover: #f0f0f1;
+  --bg-soft: #f5f5f6;
+  --surface: #fff;
+  --line: #e6e6e8;
+  --line-2: #dcdcde;
+  --line-3: #d0d0d4;
+  --t1: #1f1f23;
+  --t2: #5f5f66;
+  --t3: #62626a;
+  --t4: #6f6f78;
+  --green: #47815c;
+  --green-h: #3f7553;
+  --green-soft: #edf4ef;
+  --green-t: #2f6b49;
+  --red: #c0392b;
+  --danger-bg: #fdf5f5;
+  --font: "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font);
+  background: #eef0f2;
+  color: var(--t1);
+  padding: 36px;
+  line-height: 1.5;
+}
+
+.page-head { max-width: 1600px; margin: 0 auto 28px; }
+.page-head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.2px; margin-bottom: 8px; }
+.page-head p { font-size: 13px; color: var(--t3); }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.toc a {
+  font-size: 12px; color: var(--t2); text-decoration: none;
+  padding: 5px 11px; background: var(--surface);
+  border: 1px solid var(--line-2); border-radius: 20px;
+}
+.toc a:hover { border-color: var(--green); color: var(--green); }
+
+section { max-width: 1600px; margin: 0 auto 52px; scroll-margin-top: 24px; }
+.sec-head {
+  display: flex; align-items: baseline; gap: 12px;
+  margin-bottom: 16px; padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-2);
+}
+.sec-num {
+  font-size: 12px; font-weight: 600; color: var(--green);
+  background: var(--green-soft); padding: 2px 9px; border-radius: 5px;
+}
+.sec-head h2 { font-size: 17px; font-weight: 600; }
+.sec-head .desc { font-size: 12.5px; color: var(--t4); }
+
+.row { display: flex; gap: 32px; flex-wrap: wrap; align-items: flex-start; }
+.col { display: flex; flex-direction: column; gap: 12px; }
+.cap { font-size: 12px; color: var(--t4); font-weight: 500; }
+.note { font-size: 12px; color: var(--t4); line-height: 1.75; max-width: 440px; }
+.note b { color: var(--t2); font-weight: 500; }
+.note code {
+  font-family: var(--mono); font-size: 11px;
+  background: var(--bg-soft); padding: 1px 5px; border-radius: 3px;
+}
+
+/* ── 对话区外框 ── */
+.chat-frame {
+  width: 720px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(0,0,0,.05);
+  overflow: hidden;
+}
+.chat-head {
+  display: flex; align-items: center; gap: 10px;
+  height: 46px; padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-bar);
+}
+.ch-title { font-size: 13px; font-weight: 500; color: var(--t1); }
+.ch-ws {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11.5px; color: var(--t4);
+}
+.ch-ws svg { width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+.ch-sp { flex: 1; }
+.ch-btn {
+  width: 28px; height: 28px; border: none; background: none; border-radius: 6px;
+  color: var(--t3); cursor: pointer; display: grid; place-items: center;
+}
+.ch-btn:hover { background: var(--bg-hover); color: var(--t1); }
+.ch-btn svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+
+.chat-body {
+  padding: 24px 28px 32px;
+  display: flex; flex-direction: column; gap: 26px;
+}
+
+/* ══════ 用户消息 ══════ */
+.u-msg { display: flex; justify-content: flex-end; }
+.u-bubble {
+  max-width: 78%;
+  background: var(--bg-soft);
+  border-radius: 14px 14px 4px 14px;
+  padding: 10px 15px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--t1);
+}
+
+/* ══════ AI 消息 ══════ */
+.a-msg { display: flex; gap: 12px; }
+.a-avatar {
+  width: 26px; height: 26px; flex: none;
+  border-radius: 8px;
+  background: var(--green-soft);
+  display: grid; place-items: center;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 1px;
+}
+.a-body { flex: 1; min-width: 0; }
+.a-meta {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px;
+  font-size: 11.5px;
+  color: var(--t4);
+}
+.a-meta .who { color: var(--t2); font-weight: 500; }
+.a-meta .tm { font-family: var(--mono); font-size: 10.5px; }
+
+/* 工具步骤 */
+.tool-group {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 10px;
+  margin-bottom: 10px;
+  border-radius: 13px;
+  background: var(--bg-soft);
+  font-size: 11.5px;
+  color: var(--t3);
+  cursor: pointer;
+}
+.tool-group:hover { background: var(--bg-hover); }
+.tool-group .tg-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+.tool-group svg { width: 12px; height: 12px; stroke: var(--t4); fill: none; stroke-width: 2; }
+
+.tool-list {
+  display: flex; flex-direction: column; gap: 3px;
+  margin-bottom: 12px; padding-left: 2px;
+}
+.tool-row {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; color: var(--t3);
+}
+.tool-row .ti {
+  width: 14px; height: 14px; flex: none;
+  border-radius: 3px; background: var(--bg-soft);
+  display: grid; place-items: center;
+  font-size: 8px; color: var(--t3); font-weight: 600;
+}
+.tool-row .tn { color: var(--t2); }
+.tool-row .ta {
+  font-family: var(--mono); font-size: 10.5px; color: var(--t4);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 正文 */
+.a-text {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--t1);
+}
+.a-text p { margin: 0 0 12px; }
+.a-text p:last-child { margin-bottom: 0; }
+.a-text code {
+  font-family: var(--mono); font-size: 12px;
+  background: var(--bg-soft); border: 1px solid var(--line);
+  border-radius: 4px; padding: 1px 5px;
+}
+.a-text pre {
+  background: var(--bg-soft); border: 1px solid var(--line);
+  border-radius: 8px; padding: 12px 14px;
+  overflow-x: auto; margin: 0 0 12px;
+  font-family: var(--mono); font-size: 12px; line-height: 1.7;
+}
+.a-text ul { margin: 0 0 12px; padding-left: 20px; }
+.a-text li { margin-bottom: 4px; }
+
+/* 操作栏 */
+.a-actions {
+  display: flex; gap: 2px; margin-top: 10px;
+  opacity: 0; transition: opacity .14s;
+}
+.a-msg:hover .a-actions { opacity: 1; }
+.a-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 26px; padding: 0 9px;
+  border: none; background: none; border-radius: 6px;
+  font-family: var(--font); font-size: 11.5px; color: var(--t3);
+  cursor: pointer;
+}
+.a-btn:hover { background: var(--bg-hover); color: var(--t1); }
+.a-btn svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+
+/* ══════ 流式中状态 ══════ */
+.thinking {
+  display: flex; align-items: center; gap: 7px;
+  height: 28px; color: var(--t3); font-size: 12.5px;
+}
+.thinking .dots { display: flex; gap: 3px; }
+.thinking .dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--green); opacity: .4;
+}
+.thinking .dot:nth-child(2) { opacity: .7; }
+.thinking .dot:nth-child(3) { opacity: 1; }
+
+.cursor {
+  display: inline-block; width: 2px; height: 14px;
+  background: var(--green); vertical-align: -2px;
+  margin-left: 1px;
+}
+
+/* ══════ 输入区 ══════ */
+.composer-area { padding: 0 28px 18px; }
+.composer {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  background: var(--surface);
+  transition: border-color .16s;
+}
+.composer:focus-within { border-color: var(--green); }
+.cm-text {
+  padding: 14px 16px 4px;
+  font-size: 13.5px; line-height: 22px;
+  color: var(--t1); min-height: 48px;
+}
+.cm-text.placeholder { color: #a8a8b0; }
+.cm-bar {
+  display: flex; align-items: center; gap: 6px;
+  height: 42px; padding: 0 10px;
+}
+.cm-btn {
+  width: 28px; height: 28px; border: none; background: none;
+  border-radius: 7px; color: var(--t3); cursor: pointer;
+  display: grid; place-items: center;
+}
+.cm-btn:hover { background: var(--bg-hover); color: var(--t1); }
+.cm-btn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; }
+.cm-sp { flex: 1; }
+.ctx-pill {
+  display: flex; align-items: center; gap: 8px;
+  height: 28px; padding: 0 10px; border-radius: 7px;
+  font-size: 11.5px; color: var(--t3); cursor: pointer;
+  border: none; background: none;
+}
+.ctx-pill:hover { background: var(--bg-hover); }
+.ctx-bar {
+  width: 64px; height: 4px; border-radius: 2px;
+  background: var(--bg-soft); overflow: hidden;
+}
+.ctx-bar i { display: block; height: 100%; background: var(--green); border-radius: 2px; }
+.send-btn {
+  width: 30px; height: 30px; border-radius: 8px; border: none;
+  background: var(--green); color: #fff; cursor: pointer;
+  display: grid; place-items: center;
+}
+.send-btn:hover { background: var(--green-h); }
+.send-btn svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
+.cm-hint {
+  text-align: center; font-size: 11px; color: var(--t4);
+  padding: 8px 0 0;
+}
+
+
+/* ══════ 用户手动终止 ══════ */
+.stopped-msg {
+  display: flex; align-items: center; gap: 7px;
+  margin-top: 10px; padding: 7px 11px;
+  border-radius: 7px;
+  background: var(--bg-soft);
+  font-size: 12px; color: var(--t3);
+  width: fit-content;
+}
+.stopped-msg svg { width: 13px; height: 13px; stroke: var(--t4); fill: none; stroke-width: 2; }
+.stopped-msg .retry {
+  margin-left: 4px; border: none; background: none;
+  color: var(--green); font-size: 12px; font-family: var(--font);
+  cursor: pointer; padding: 0 4px;
+}
+.stopped-msg .retry:hover { text-decoration: underline; }
+
+/* ══════ 顶部浮动提问 ══════ */
+.float-q {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 9px 14px; margin: 8px 20px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.07);
+  font-size: 12.5px; line-height: 1.5; color: var(--t2);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.float-q:hover { background: var(--bg-hover); border-color: var(--line-3); }
+.float-q .fq-dot {
+  flex: none; width: 6px; height: 6px;
+  margin-top: 6px; border-radius: 50%; background: var(--green);
+}
+.float-q .fq-text {
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; word-break: break-word;
+}
+
+/* ══════ 底部跳转按钮 ══════ */
+.jump-area {
+  padding: 0 0 12px;
+  display: flex; justify-content: center;
+}
+.jump-btn {
+  display: flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 14px;
+  border-radius: 15px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgba(0,0,0,.1);
+  font-family: var(--font); font-size: 12px; color: var(--t2);
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.jump-btn:hover { background: var(--bg-hover); border-color: var(--line-3); }
+.jump-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.jump-btn.live { border-color: var(--green); color: var(--green); }
+.jump-btn.live:hover { background: var(--green-soft); }
+.jump-btn .jd { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+
+/* ── 规格表 ── */
+.spec-table {
+  border-collapse: collapse; font-size: 12.5px;
+  background: var(--surface); border-radius: 10px;
+  overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  min-width: 340px;
+}
+.spec-table th {
+  text-align: left; font-weight: 500; font-size: 11.5px;
+  color: var(--t4); padding: 9px 14px;
+  background: var(--bg-bar); border-bottom: 1px solid var(--line);
+}
+.spec-table td { padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--t2); }
+.spec-table tr:last-child td { border-bottom: none; }
+.spec-table td:first-child { color: var(--t1); }
+.spec-table code {
+  font-family: var(--mono); font-size: 11px;
+  color: var(--green); background: var(--green-soft);
+  padding: 1px 4px; border-radius: 3px;
+}
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>对话区设计稿</h1>
+  <p>Claude 工作台 · 2026-10-27 · 消息气泡、工具步骤、输入区</p>
+  <div class="toc">
+    <a href="#s1">① 整体对话流</a>
+    <a href="#s2">② 用户消息</a>
+    <a href="#s3">③ AI 消息</a>
+    <a href="#s4">④ 工具步骤</a>
+    <a href="#s5">⑤ 流式状态</a>
+    <a href="#s6">⑥ 手动终止</a>
+    <a href="#s7">⑦ 顶部浮动提问</a>
+    <a href="#s8">⑧ 底部跳转</a>
+    <a href="#s9">⑨ 规格汇总</a>
+  </div>
+</div>
+
+<!-- ① 整体 -->
+<section id="s1">
+  <div class="sec-head">
+    <span class="sec-num">①</span>
+    <h2>整体对话流</h2>
+    <span class="desc">AI 加头像；用户气泡圆角收口；工具步骤折叠为胶囊</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="chat-frame">
+        <div class="chat-head">
+          <span class="ch-title">把订单接口改成幂等</span>
+          <span class="ch-ws">
+            <svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/></svg>
+            CCWorkspace
+          </span>
+          <span class="ch-sp"></span>
+          <button class="ch-btn"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M15 5.5H6A1.5 1.5 0 004.5 7v9"/></svg></button>
+          <button class="ch-btn"><svg viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13"/></svg></button>
+        </div>
+
+        <div class="chat-body">
+          <!-- 用户 -->
+          <div class="u-msg">
+            <div class="u-bubble">把 createOrder 改成幂等，重复提交只创建一次</div>
+          </div>
+
+          <!-- AI -->
+          <div class="a-msg">
+            <div class="a-avatar">C</div>
+            <div class="a-body">
+              <div class="a-meta">
+                <span class="who">Claude</span>
+                <span class="tm">14:05</span>
+              </div>
+
+              <div class="tool-group">
+                <span class="tg-dot"></span>
+                <span>已处理 4 步</span>
+                <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+              </div>
+
+              <div class="a-text">
+                <p>看完了 <code>order.service.ts</code> 的创建逻辑，加了幂等键校验：</p>
+                <pre><span style="color:#8a8a96">// 已存在相同幂等键时直接返回原订单</span>
+const existing = await repo.findByIdempotencyKey(key)
+if (existing) return existing</pre>
+                <p>主要改动三点：</p>
+                <ul>
+                  <li>入参增加 <code>idempotencyKey</code> 字段</li>
+                  <li>建表加了唯一索引，防止并发穿透</li>
+                  <li>补了 3 个测试用例覆盖重复提交</li>
+                </ul>
+              </div>
+
+              <div class="a-actions">
+                <button class="a-btn"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M15 5.5H6A1.5 1.5 0 004.5 7v9"/></svg>复制</button>
+                <button class="a-btn"><svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z"/></svg>重试</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 用户 -->
+          <div class="u-msg">
+            <div class="u-bubble">并发场景怎么保证的？</div>
+          </div>
+
+          <!-- AI 流式中 -->
+          <div class="a-msg">
+            <div class="a-avatar">C</div>
+            <div class="a-body">
+              <div class="a-meta"><span class="who">Claude</span><span class="tm">14:08</span></div>
+              <div class="a-text">
+                <p>靠数据库层的唯一索引兜底——两个请求同时插入时，<span class="cursor"></span></p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="composer-area">
+          <div class="composer">
+            <div class="cm-text placeholder">描述你想让它做的事，或输入 / 调用命令与 Skill…</div>
+            <div class="cm-bar">
+              <button class="cm-btn"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+              <span class="cm-sp"></span>
+              <button class="ctx-pill">
+                <span class="ctx-bar"><i style="width:24%"></i></span>
+                <span>24%</span>
+              </button>
+              <button class="send-btn"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+            </div>
+          </div>
+          <div class="cm-hint">Enter 发送 · Shift + Enter 换行 · / 调用命令 · 可直接粘贴图片</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="cap">核心改动</div>
+      <p class="note">
+        <b>1. AI 加头像</b><br>
+        左侧 26×26 圆角方块，浅绿底 + 字母 C。原先只有一行灰色 "Claude" 文字，视觉上分不清谁在说话。
+      </p>
+      <p class="note">
+        <b>2. 用户气泡圆角收口</b><br>
+        <code>14px 14px 4px 14px</code>——右下角小圆角指向自己，像 iMessage。
+      </p>
+      <p class="note">
+        <b>3. 工具步骤改胶囊</b><br>
+        原来是竖排 3-4 行文字，占了一大块。改成「● 已处理 4 步 ⌄」一个胶囊，点击展开。
+      </p>
+      <p class="note">
+        <b>4. 消息间距 26px</b><br>
+        原来 30px 偏大，26px 更紧凑；同一轮内的工具和正文仍保持 10-12px。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ② 用户消息 -->
+<section id="s2">
+  <div class="sec-head">
+    <span class="sec-num">②</span>
+    <h2>用户消息</h2>
+    <span class="desc">右对齐 · 圆角收口 · 最大宽度 78%</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="chat-frame" style="width:620px">
+        <div class="chat-body">
+          <div class="u-msg"><div class="u-bubble">简短问题</div></div>
+          <div class="u-msg">
+            <div class="u-bubble">这是一条比较长的消息，用来测试在内容较多时气泡的最大宽度限制是否生效，会不会把整个对话区撑得太满而失去呼吸感。</div>
+          </div>
+          <div class="u-msg">
+            <div class="u-bubble">
+              多行内容也支持：<br>
+              第一行<br>
+              第二行<br>
+              第三行
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>对齐</td><td>右对齐</td></tr>
+        <tr><td>最大宽度</td><td><code>78%</code></td></tr>
+        <tr><td>背景</td><td><code>--bg-soft</code></td></tr>
+        <tr><td>圆角</td><td><code>14px 14px 4px 14px</code></td></tr>
+        <tr><td>内边距</td><td><code>10px 15px</code></td></tr>
+        <tr><td>字号 / 行高</td><td><code>13.5px / 1.6</code></td></tr>
+      </table>
+      <p class="note">
+        右下角 4px 小圆角是「狗耳朵」效果，指向发送者。<br>
+        不用纯色绿底，避免满屏色块；灰底在浅色/暗色下都稳。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ③ AI 消息 -->
+<section id="s3">
+  <div class="sec-head">
+    <span class="sec-num">③</span>
+    <h2>AI 消息</h2>
+    <span class="desc">左侧头像 · 元信息 · 操作栏悬停出现</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="chat-frame" style="width:620px">
+        <div class="chat-body">
+          <div class="a-msg">
+            <div class="a-avatar">C</div>
+            <div class="a-body">
+              <div class="a-meta">
+                <span class="who">Claude</span>
+                <span class="tm">14:05</span>
+              </div>
+              <div class="a-text">
+                <p>单行的行内代码：<code>npm run build</code>，以及普通正文。</p>
+              </div>
+              <div class="a-actions">
+                <button class="a-btn"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M15 5.5H6A1.5 1.5 0 004.5 7v9"/></svg>复制</button>
+                <button class="a-btn"><svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z"/></svg>重试</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>头像</td><td><code>26×26</code>，圆角 <code>8px</code></td></tr>
+        <tr><td>头像底色</td><td><code>--green-soft</code>，字母 <code>--green</code></td></tr>
+        <tr><td>头像与正文间距</td><td><code>12px</code></td></tr>
+        <tr><td>元信息字号</td><td><code>11.5px</code>，时间 <code>10.5px mono</code></td></tr>
+        <tr><td>正文字号 / 行高</td><td><code>13.5px / 1.75</code></td></tr>
+        <tr><td>操作栏</td><td>默认 <code>opacity: 0</code>，悬停显示</td></tr>
+        <tr><td>操作按钮高</td><td><code>26px</code>，圆角 <code>6px</code></td></tr>
+      </table>
+      <p class="note">
+        头像让「谁在说话」一目了然，比纯文字标签清晰。<br>
+        元信息只保留名字与时间，去掉多余装饰。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ④ 工具步骤 -->
+<section id="s4">
+  <div class="sec-head">
+    <span class="sec-num">④</span>
+    <h2>工具步骤</h2>
+    <span class="desc">折叠为胶囊 · 展开看明细</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="cap">折叠态（默认）</div>
+      <div class="chat-frame" style="width:520px">
+        <div class="chat-body" style="gap:0">
+          <div class="a-msg">
+            <div class="a-avatar">C</div>
+            <div class="a-body">
+              <div class="tool-group">
+                <span class="tg-dot"></span>
+                <span>已处理 4 步</span>
+                <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+              </div>
+              <div class="a-text"><p>看完了创建逻辑，加了幂等键校验。</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cap" style="margin-top:16px">展开态</div>
+      <div class="chat-frame" style="width:520px">
+        <div class="chat-body" style="gap:0">
+          <div class="a-msg">
+            <div class="a-avatar">C</div>
+            <div class="a-body">
+              <div class="tool-group">
+                <span class="tg-dot"></span>
+                <span>已处理 4 步</span>
+                <svg viewBox="0 0 24 24" style="transform:rotate(180deg)"><path d="M6 9l6 6 6-6"/></svg>
+              </div>
+              <div class="tool-list">
+                <div class="tool-row"><span class="ti">R</span><span class="tn">Read</span><span class="ta">src/order.service.ts</span></div>
+                <div class="tool-row"><span class="ti">G</span><span class="tn">Grep</span><span class="ta">createOrder</span></div>
+                <div class="tool-row"><span class="ti">E</span><span class="tn">Edit</span><span class="ta">src/order.service.ts</span></div>
+                <div class="tool-row"><span class="ti">B</span><span class="tn">Bash</span><span class="ta">npm test -- order</span></div>
+              </div>
+              <div class="a-text"><p>看完了创建逻辑，加了幂等键校验。</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>胶囊高度</td><td><code>26px</code>，圆角 <code>13px</code></td></tr>
+        <tr><td>胶囊内边距</td><td><code>0 10px</code></td></tr>
+        <tr><td>状态点</td><td><code>5×5</code>，绿色</td></tr>
+        <tr><td>明细行高</td><td><code>20px</code>，字号 <code>11.5px</code></td></tr>
+        <tr><td>工具图标</td><td><code>14×14</code>，圆角 <code>3px</code>，字母缩写</td></tr>
+        <tr><td>参数文字</td><td><code>10.5px mono</code>，<code>--t4</code></td></tr>
+      </table>
+      <p class="note">
+        <b>为什么改</b>：原来 4 个工具就占 100px 高度，长对话里满屏都是工具名，正文被挤下去。
+      </p>
+      <p class="note">
+        折叠后只占 26px，需要时点开看细节。参数过长时省略号截断，悬停看全。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ⑤ 流式状态 -->
+<section id="s5">
+  <div class="sec-head">
+    <span class="sec-num">⑤</span>
+    <h2>流式状态</h2>
+    <span class="desc">思考中 · 输出中</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="cap">思考中（还没有内容）</div>
+      <div class="chat-frame" style="width:520px">
+        <div class="chat-body" style="gap:0">
+          <div class="a-msg">
+            <div class="a-avatar">C</div>
+            <div class="a-body">
+              <div class="thinking">
+                <span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+                <span>正在思考…</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cap" style="margin-top:16px">输出中（带光标）</div>
+      <div class="chat-frame" style="width:520px">
+        <div class="chat-body" style="gap:0">
+          <div class="a-msg">
+            <div class="a-avatar">C</div>
+            <div class="a-body">
+              <div class="a-text">
+                <p>靠数据库层的唯一索引兜底——两个请求同时插入时，<span class="cursor"></span></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>圆点</td><td><code>5×5</code>，间距 <code>3px</code></td></tr>
+        <tr><td>呼吸动画</td><td>透明度 <code>.4 → 1 → .4</code>，1.4s，依次延迟 0.18s</td></tr>
+        <tr><td>光标</td><td><code>2×14px</code>，绿色，垂直对齐 <code>-2px</code></td></tr>
+        <tr><td>文字</td><td><code>12.5px</code>，<code>--t3</code></td></tr>
+      </table>
+      <p class="note">
+        <b>光标</b>让用户清楚「还在输出」而不是「卡住了」。<br>
+        比整块文字闪烁更轻，不打断阅读。
+      </p>
+      <p class="note">
+        尊重 <code>prefers-reduced-motion</code>：系统开了减少动效时，圆点不呼吸、光标不闪烁。
+      </p>
+    </div>
+  </div>
+</section>
+
+
+<!-- ⑥ 手动终止 -->
+<section id="s6">
+  <div class="sec-head">
+    <span class="sec-num">⑥</span>
+    <h2>用户手动终止</h2>
+    <span class="desc">明确告知已停止 · 可一键重试</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="chat-frame" style="width:520px">
+        <div class="chat-body" style="gap:0">
+          <div class="u-msg"><div class="u-bubble">把订单接口改成幂等</div></div>
+          <div class="a-msg" style="margin-top:20px">
+            <div class="a-avatar">C</div>
+            <div class="a-body">
+              <div class="a-meta"><span class="who">Claude</span><span class="tm">14:05</span></div>
+              <div class="a-text">
+                <p>看完了创建逻辑，建议在入参增加幂等键，并对并发场景加唯一索引</p>
+              </div>
+              <div class="stopped-msg">
+                <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+                <span>已停止生成</span>
+                <button class="retry">重新生成</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>容器</td><td>灰底胶囊，<code>--bg-soft</code></td></tr>
+        <tr><td>内边距</td><td><code>7px 11px</code></td></tr>
+        <tr><td>圆角</td><td><code>7px</code></td></tr>
+        <tr><td>图标</td><td><code>13x13</code> 方块，<code>--t4</code></td></tr>
+        <tr><td>文字</td><td><code>12px</code>，<code>--t3</code></td></tr>
+        <tr><td>重试按钮</td><td>绿色文字，悬停下划线</td></tr>
+      </table>
+      <p class="note">
+        <b>关键</b>：终止后不能只留半截话让人猜。明确写出「已停止生成」，<br>
+        并给一个「重新生成」入口，省得用户手动重打一遍。
+      </p>
+      <p class="note">
+        半截内容不丢弃——已经流式输出到界面的部分保留，并写进数据库。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ⑦ 顶部浮动提问 -->
+<section id="s7">
+  <div class="sec-head">
+    <span class="sec-num">⑦</span>
+    <h2>顶部浮动提问</h2>
+    <span class="desc">上翻阅读时显示当前视口的提问，点击跳回</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="chat-frame" style="width:620px">
+        <div class="chat-head">
+          <span class="ch-title">把订单接口改成幂等</span>
+          <span class="ch-ws"><svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/></svg>CCWorkspace</span>
+          <span class="ch-sp"></span>
+        </div>
+        <div class="float-q">
+          <span class="fq-dot"></span>
+          <span class="fq-text">并发场景怎么保证的？如果用乐观锁会不会更好，还是继续用唯一索引？</span>
+        </div>
+        <div class="chat-body" style="padding-top:8px">
+          <div class="a-msg">
+            <div class="a-avatar">C</div>
+            <div class="a-body">
+              <div class="a-meta"><span class="who">Claude</span><span class="tm">14:08</span></div>
+              <div class="a-text">
+                <p>靠数据库层的唯一索引兜底——两个请求同时插入时，后到的那个会因唯一约束失败。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>出现条件</td><td>距底部 &gt; <code>120px</code></td></tr>
+        <tr><td>位置</td><td>顶栏下方，占位不遮挡正文</td></tr>
+        <tr><td>左右外边距</td><td><code>20px</code></td></tr>
+        <tr><td>内边距</td><td><code>9px 14px</code></td></tr>
+        <tr><td>圆角</td><td><code>10px</code></td></tr>
+        <tr><td>正文行数</td><td>最多 2 行，超出省略</td></tr>
+        <tr><td>绿点</td><td><code>6x6</code>，表示这是用户提问</td></tr>
+      </table>
+      <p class="note">
+        <b>为什么用占位布局</b>：绝对定位会盖住正文第一行。<br>
+        这里让它真实占据高度，滚动区从它下方开始。
+      </p>
+      <p class="note">
+        内容是「当前视口最上方的用户消息」，滚动时实时更新。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ⑧ 底部跳转按钮 -->
+<section id="s8">
+  <div class="sec-head">
+    <span class="sec-num">⑧</span>
+    <h2>底部跳转按钮</h2>
+    <span class="desc">上翻时出现 · 回复中会醒目提示</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="cap">普通态（回复已完成）</div>
+      <div class="chat-frame" style="width:520px">
+        <div class="chat-body" style="padding:28px 0">
+          <div style="color:var(--t4);font-size:12px;text-align:center">（向上翻阅历史消息中…）</div>
+        </div>
+        <div class="jump-area">
+          <button class="jump-btn">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+            <span>回到最新</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="cap" style="margin-top:16px">回复中（带绿点）</div>
+      <div class="chat-frame" style="width:520px">
+        <div class="chat-body" style="padding:28px 0">
+          <div style="color:var(--t4);font-size:12px;text-align:center">（向上翻阅历史消息中…）</div>
+        </div>
+        <div class="jump-area">
+          <button class="jump-btn live">
+            <span class="jd"></span>
+            <span>回到最新</span>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>出现条件</td><td>距底部 &gt; <code>120px</code></td></tr>
+        <tr><td>位置</td><td>输入框上方 <code>12px</code>，水平居中</td></tr>
+        <tr><td>高度 / 圆角</td><td><code>30px</code> / 全圆 <code>15px</code></td></tr>
+        <tr><td>内边距</td><td><code>0 14px</code></td></tr>
+        <tr><td>普通态</td><td>白底灰字，<code>--line-2</code> 边框</td></tr>
+        <tr><td>回复中</td><td>绿色边框 + 绿色文字 + 绿点</td></tr>
+      </table>
+      <p class="note">
+        <b>行为</b>：出现后<b>不再自动把人拽回底部</b>。用户上翻就是在读历史，<br>
+        什么时候回去由他自己决定。
+      </p>
+      <p class="note">
+        回复进行中时用绿点提醒「还有内容在生成」，但不强制滚动。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ⑨ 规格汇总 -->
+<section id="s9">
+  <div class="sec-head">
+    <span class="sec-num">⑥</span>
+    <h2>规格汇总</h2>
+    <span class="desc">实现时直接取用</span>
+  </div>
+  <div class="row">
+    <div class="col">
+      <div class="cap">布局</div>
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>内容最大宽</td><td><code>720px</code>（现有）</td></tr>
+        <tr><td>内容左右内边距</td><td><code>28px</code></td></tr>
+        <tr><td>消息间距</td><td><code>26px</code></td></tr>
+        <tr><td>底部留白</td><td><code>32px</code></td></tr>
+      </table>
+    </div>
+    <div class="col">
+      <div class="cap">圆角体系</div>
+      <table class="spec-table">
+        <tr><th>元素</th><th>圆角</th></tr>
+        <tr><td>用户气泡</td><td><code>14 / 14 / 4 / 14</code></td></tr>
+        <tr><td>AI 头像</td><td><code>8px</code></td></tr>
+        <tr><td>工具胶囊</td><td><code>13px</code>（全圆）</td></tr>
+        <tr><td>代码块</td><td><code>8px</code></td></tr>
+        <tr><td>输入框</td><td><code>14px</code></td></tr>
+        <tr><td>小按钮</td><td><code>6px</code></td></tr>
+      </table>
+    </div>
+    <div class="col">
+      <div class="cap">颜色语义</div>
+      <table class="spec-table">
+        <tr><th>元素</th><th>色值</th></tr>
+        <tr><td>用户气泡底</td><td><code>--bg-soft</code></td></tr>
+        <tr><td>AI 头像底</td><td><code>--green-soft</code></td></tr>
+        <tr><td>工具胶囊底</td><td><code>--bg-soft</code></td></tr>
+        <tr><td>正文字</td><td><code>--t1</code></td></tr>
+        <tr><td>元信息</td><td><code>--t4</code></td></tr>
+        <tr><td>光标 / 状态点</td><td><code>--green</code></td></tr>
+      </table>
+    </div>
+    <div class="col">
+      <div class="cap">动效</div>
+      <table class="spec-table">
+        <tr><th>项</th><th>值</th></tr>
+        <tr><td>消息入场</td><td><code>msg-in 0.22s ease</code>（现有）</td></tr>
+        <tr><td>操作栏</td><td><code>opacity .14s</code></td></tr>
+        <tr><td>思考圆点</td><td><code>1.4s</code> 循环</td></tr>
+      </table>
+      <p class="note" style="margin-top:10px">
+        全部在 <code>prefers-reduced-motion</code> 下关闭。
+      </p>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

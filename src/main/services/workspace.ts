@@ -62,37 +62,10 @@ export async function addWorkspace(dir: string | null | undefined): Promise<Work
 /**
  * 移除工作区：数据库里级联删除其会话与消息。
  * 不触碰磁盘目录。
- *
- * 若移除的正是默认工作区，必须一并清掉 meta 里的指向，
- * 否则 resolveWorkspaceId 会一直返回这个已不存在的 id，
- * 新建会话全部报"指定的工作区不存在"。
  */
 export function removeWorkspace(id: string): Workspace[] {
-  const db = getDb()
-  db.prepare('DELETE FROM workspaces WHERE id = ?').run(id)
-  db.prepare("DELETE FROM meta WHERE key = 'default_workspace_id' AND value = ?").run(id)
+  getDb().prepare('DELETE FROM workspaces WHERE id = ?').run(id)
   return listWorkspaces()
-}
-
-/** 默认工作区记在 meta 表，持久化在同一个库里 */
-export function getDefaultWorkspaceId(): string | null {
-  const row = getDb()
-    .prepare("SELECT value FROM meta WHERE key = 'default_workspace_id'")
-    .get() as { value?: string } | undefined
-  return row?.value ?? null
-}
-
-export function setDefaultWorkspaceId(id: string | null): void {
-  const db = getDb()
-  if (id === null) {
-    db.prepare("DELETE FROM meta WHERE key = 'default_workspace_id'").run()
-    return
-  }
-  const exists = db.prepare('SELECT id FROM workspaces WHERE id = ?').get(id)
-  if (!exists) throw new Error('指定的工作区不存在')
-  db.prepare(
-    "INSERT INTO meta(key, value) VALUES('default_workspace_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-  ).run(id)
 }
 
 /** 重命名工作区（只改展示名，不动磁盘目录） */
@@ -119,16 +92,12 @@ export function setTheme(theme: 'light' | 'dark'): void {
     .run(theme)
 }
 
-/** 解析新建会话应归属的工作区：显式指定 → 默认 → 第一个 */
+/**
+ * 解析新建会话应归属的工作区。
+ *
+ * 现在会话一律在指定工作区下创建，不再有"默认工作区"的概念，
+ * 未指定时直接报错，避免用户以为建成功了。
+ */
 export function resolveWorkspaceId(requested: string | null): string | null {
-  if (requested) return requested
-  const db = getDb()
-  // 默认值可能是历史遗留的悬空 id（老版本删工作区没清 meta），
-  // 所以要校验它确实还在，不在就继续往下回落。
-  const def = getDefaultWorkspaceId()
-  if (def && db.prepare('SELECT id FROM workspaces WHERE id = ?').get(def)) return def
-  const first = db.prepare('SELECT id FROM workspaces ORDER BY created_at ASC LIMIT 1').get() as
-    | { id: string }
-    | undefined
-  return first?.id ?? null
+  return requested
 }

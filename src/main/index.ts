@@ -5,11 +5,9 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { initDb, closeDb } from './db'
 import {
   addWorkspace,
-  getDefaultWorkspaceId,
   listWorkspaces,
   removeWorkspace,
   renameWorkspace,
-  setDefaultWorkspaceId,
   getTheme,
   setTheme
 } from './services/workspace'
@@ -462,8 +460,6 @@ function registerIpc(): void {
   handle('workspace:list', () => listWorkspaces())
   handle('workspace:add', (dir: string) => addWorkspace(dir))
   handle('workspace:remove', (id: string) => removeWorkspace(id))
-  handle('workspace:getDefault', () => getDefaultWorkspaceId())
-  handle('workspace:setDefault', (id: string | null) => setDefaultWorkspaceId(id))
   handle('workspace:rename', (id: string, name: string) => renameWorkspace(id, name))
   handle('workspace:pick', async () => {
     const result = await dialog.showOpenDialog({
@@ -557,17 +553,11 @@ function registerIpc(): void {
   handle('config:saveModels', (m: Record<string, string>) => saveModels(m))
   handle('config:testConnection', () => testConnection())
 
-  /* Skill */
-  handle('skill:list', async () => {
-    const def = getDefaultWorkspaceId()
-    const ws = listWorkspaces().find((w) => w.id === def)
-    return listSkills(ws?.path ?? null)
-  })
+  /* Skill：只列全局 Skill，不含项目级 */
+  handle('skill:list', () => listSkills(null))
   handle('skill:toggle', async (name: string, enabled: boolean) => {
     await toggleSkill(name, enabled)
-    const def = getDefaultWorkspaceId()
-    const ws = listWorkspaces().find((w) => w.id === def)
-    return listSkills(ws?.path ?? null)
+    return listSkills(null)
   })
 
   /* 插件与仓库 */
