@@ -820,7 +820,7 @@ async function stop(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 46px;
+  height: 48px;
   padding: 0 24px;
   border-bottom: 1px solid var(--line);
   /* 窄窗口下标题过长会把右侧按钮挤出可视区 */
@@ -831,6 +831,7 @@ async function stop(): Promise<void> {
 .mh-title {
   font-size: 14px;
   font-weight: 500;
+  line-height: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -875,6 +876,7 @@ async function stop(): Promise<void> {
 
 .mh-ws {
   font-size: 11.5px;
+  line-height: 1;
   color: var(--t4);
   display: flex;
   align-items: center;
@@ -905,6 +907,7 @@ async function stop(): Promise<void> {
   flex: none;
   display: grid;
   place-items: center;
+  line-height: 0;
   color: var(--t3);
 }
 
