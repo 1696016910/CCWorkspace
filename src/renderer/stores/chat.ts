@@ -26,10 +26,18 @@ export const useChatStore = defineStore('chat', () => {
   /** 当前这一轮的 runId；事件带的 runId 与之不符即为过期事件 */
   /**
    * 当前期望的 runId；0 表示"没有在等任何一轮"。
-   * 用 0 而不是 null，是为了让"停止后的迟到事件"同样被过滤掉 ——
-   * 若用 null 表示不设限，旧 run 的 done 会在停止后溜进来清掉新一轮的流式显示。
+   *
+   * 停止后要保留它：主进程的 done 是异步到达的，
+   * 提前清零会让这条 done 被当成过期事件丢弃，
+   * 表现为"消息发出去了但界面什么都没显示"。
    */
   const activeRunId = ref(0)
+  /**
+   * 仍在等待收尾的旧 run。停止后立刻重发时，
+   * 新 run 会占用 activeRunId，旧 run 的 done 靠这个集合识别，
+   * 保证它的内容不会被误丢。
+   */
+  const pendingRuns = new Set<number>()
 
   let unsubscribe: (() => void) | null = null
 
@@ -50,6 +58,8 @@ export const useChatStore = defineStore('chat', () => {
       // start 是"认领新一轮"，必须在过滤之前处理，
       // 否则第一次 start 会因为 activeRunId 还是 0 而被自己挡掉
       if (e.type === 'start') {
+        // 上一个 run 若还在收尾，记下来，避免它的 done 被当成过期
+        if (activeRunId.value !== 0) pendingRuns.add(activeRunId.value)
         if (e.sessionId !== activeSessionId.value) {
           // 不是我在等的那个会话，仍要记下它，避免它的收尾被后续过滤误吞
           activeSessionId.value = e.sessionId
@@ -66,7 +76,9 @@ export const useChatStore = defineStore('chat', () => {
       // 过期 run 的事件一律丢弃。
       // 停止后立刻重发时，旧 run 的 done 会比新 run 的 text 更晚到达，
       // 不拦的话它会把新回复的流式显示清掉，界面看着像"没回复"。
-      if (e.runId !== activeRunId.value) {
+      const isCurrent = e.runId === activeRunId.value
+      const isPending = pendingRuns.has(e.runId)
+      if (!isCurrent && !isPending) {
         if (e.type === 'done' || e.type === 'error' || e.type === 'interrupted' || e.type === 'compacted') {
           listeners.onFinish(e.sessionId)
         }
@@ -90,17 +102,26 @@ export const useChatStore = defineStore('chat', () => {
           if (e.tool) streamTools.value = [...streamTools.value, e.tool]
           break
         case 'done':
-          streaming.value = false
-          streamingSessionId.value = null
-          activeRunId.value = 0
-          if (e.usage) usage.value = e.usage
-          // 带上 sessionId，由界面判断这条消息是否属于当前正在看的会话
+          pendingRuns.delete(e.runId)
+          // 只有当前 run 才复位这些界面状态；旧 run 的收尾不打断新一轮
+          if (isCurrent) {
+            streaming.value = false
+            streamingSessionId.value = null
+            activeRunId.value = 0
+          }
+          if (isCurrent && !e.message) {
+            streamText.value = ''
+            streamTools.value = []
+          }
+          if (e.usage && isCurrent) usage.value = e.usage
+          // 消息一律追加，由界面按 sessionId 判断归属
           if (e.message) {
-            // 把中断标记带给消息，界面据此显示「已停止生成」
             listeners.onDone({ ...e.message, stopped: e.interrupted === true }, e.sessionId)
           }
-          streamText.value = ''
-          streamTools.value = []
+          if (isCurrent) {
+            streamText.value = ''
+            streamTools.value = []
+          }
           listeners.onFinish(e.sessionId)
           break
         case 'error':
@@ -164,12 +185,12 @@ export const useChatStore = defineStore('chat', () => {
 
   async function stop(): Promise<void> {
     await window.api.chat.interrupt()
+    // 只复位"正在生成"的界面状态，但保留 activeRunId。
+    // 清掉它会让随后到达的 done 被当成过期事件丢弃，
+    // 结果是消息写进了库、界面却什么都不显示——用户看到的就是
+    // "发了消息没有任何回应，也没有已停止提示"。
     streaming.value = false
     streamingSessionId.value = null
-    // 清掉 runId，否则下一条消息的 start 会被"过期事件"判断挡住
-    activeRunId.value = 0
-    streamText.value = ''
-    streamTools.value = []
   }
 
   /** 压缩当前会话的上下文 */

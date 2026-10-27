@@ -123,7 +123,15 @@ export const useSessionStore = defineStore('session', () => {
   async function create(workspaceId: string | null): Promise<SessionSummary | null> {
     try {
       const created = await window.api.session.create(workspaceId)
+      // 先选中新会话，再刷新列表。
+      // 反过来的话 load() 里的 currentId 校验可能把刚设的 id 清掉，
+      // 导致界面停在旧会话、随后发出的消息落错地方。
+      currentId.value = created.id
+      messages.value = []
+      messageTotal.value = 0
       await load()
+      // 新会话一定是空的，不需要再拉消息；但仍走一次 select
+      // 保证 messages / messageTotal 状态一致
       await select(created.id)
       return created
     } catch (e) {
