@@ -844,11 +844,10 @@ async function stop(): Promise<void> {
   min-height: 0;
   overflow-y: auto;
   /* 底部留出足够空隙：只留 8px 时最后一条消息会紧贴输入框，
-     滚动到底也看不清结尾，长回复尤其明显 */
-  padding: 26px 0 24px;
-  /* 底部渐隐，让内容在接近输入框时自然淡出，而不是被硬边切掉 */
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+     滚动到底也看不清结尾，长回复尤其明显。
+     这里不能用 mask-image 做渐隐——它会连带把"正在思考"这类
+     贴着底部的内容一起吃掉，看起来就是被输入框遮挡。 */
+  padding: 26px 0 32px;
 }
 
 .thread-inner {
