@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import WorkspaceSection from './settings/WorkspaceSection.vue'
 import EnvSection from './settings/EnvSection.vue'
 import PermissionsSection from './settings/PermissionsSection.vue'
@@ -44,6 +44,11 @@ const groups = [
 function labelOf(id: TabId): string {
   return TABS.find((t) => t.id === id)?.label ?? ''
 }
+
+/** 卡片型分区的容器要更宽，否则 auto-fill 只能排两列 */
+const isCardLayout = computed(() =>
+  active.value === 'skills' || active.value === 'plugins' || active.value === 'market'
+)
 
 function iconOf(id: TabId): string {
   return TABS.find((t) => t.id === id)?.icon ?? ''
@@ -91,7 +96,7 @@ const ICONS: Record<string, string> = {
         </template>
       </nav>
       <main class="st-main">
-        <div class="st-inner">
+        <div class="st-inner" :class="{ wide: isCardLayout }">
           <WorkspaceSection v-if="active === 'ws'" />
           <EnvSection v-else-if="active === 'env'" />
           <PermissionsSection v-else-if="active === 'perm'" />
@@ -266,6 +271,12 @@ const ICONS: Record<string, string> = {
 .st-inner {
   max-width: 680px;
   padding: 28px 32px 40px;
+}
+
+/* 卡片型分区（Skill / 插件 / 仓库）用更宽的容器，
+   否则 auto-fill 在 680px 里只能排下两列 */
+.st-inner.wide {
+  max-width: none;
 }
 
 @media (max-width: 900px) {

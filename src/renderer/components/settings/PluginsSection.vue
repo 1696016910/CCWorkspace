@@ -171,8 +171,10 @@ onMounted(load)
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
-  gap: 9px;
+  /* 自适应列数：窗口宽就多排几列，窄了自动减少。
+     minmax 的下限用 clamp 让卡片在极窄时也不会挤成一团 */
+  grid-template-columns: repeat(auto-fill, minmax(clamp(220px, 24vw, 300px), 1fr));
+  gap: 10px;
 }
 
 .card {
