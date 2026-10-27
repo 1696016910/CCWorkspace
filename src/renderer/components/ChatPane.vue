@@ -1234,17 +1234,7 @@ async function stop(): Promise<void> {
   flex-direction: column;
   min-height: 92px;
   position: relative;
-  /* 静态时给一层极淡阴影，让输入区从背景里"浮"起来一点；
-     聚焦时再加强，形成明确的层级提示 */
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-  transition: border-color 0.16s ease, box-shadow 0.16s ease;
-}
-
-.composer:focus-within {
-  border-color: var(--green);
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--green) 14%, transparent),
-    0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: border-color 0.16s ease;
 }
 
 .cmd-panel {

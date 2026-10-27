@@ -479,6 +479,13 @@ button:active:not(:disabled) {
   border-radius: 3px;
 }
 
+/* 输入框自己用整块边框表达状态，不要再套一圈 outline。
+   否则点击输入时会出现"绿色内描边 + 灰色外边框"的双线效果。 */
+textarea:focus-visible,
+input:focus-visible {
+  outline: none;
+}
+
 /* 文字选中 */
 ::selection {
   background: rgba(71, 129, 92, 0.22);
