@@ -1,0 +1,111 @@
+name: release-go
+
+# 只构建 Go 版。与 Node / Rust 各自独立，互不阻塞。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-go-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: go
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: tag
+        working-directory: .
+        run: echo "tag=v$(node -p "require('./go/version.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure release exists
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.tag.outputs.tag }}"
+          echo "目标 tag: $tag"
+
+          remote_sha=$(git ls-remote --tags origin "refs/tags/$tag^{}" | cut -f1)
+          [ -z "$remote_sha" ] && remote_sha=$(git ls-remote --tags origin "refs/tags/$tag" | cut -f1)
+          if [ -z "$remote_sha" ]; then
+            echo "::error::远端不存在 tag $tag"
+            exit 1
+          fi
+          echo "tag 已存在"
+
+          check_release() { gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$tag" >/dev/null 2>&1; }
+          if ! check_release; then
+            gh release create "$tag" --draft=false --title "$tag" --notes "自动化构建产物" || true
+          fi
+          for i in 1 2 3 4 5; do
+            if check_release; then echo "Release 就绪"; exit 0; fi
+            sleep 2
+          done
+          echo "::error::Release 创建后仍查不到"
+          exit 1
+
+  build:
+    needs: prepare
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: go/go.sum
+
+      - id: ver
+        working-directory: .
+        run: echo "version=$(node -p "require('./go/version.json').version")" >> "$GITHUB_OUTPUT"
+
+      - run: go mod download
+
+      - run: go vet ./...
+
+      - run: go test ./...
+
+      # -H windowsgui 去掉控制台窗口；-s -w 去掉符号表减小体积
+      - run: go build -ldflags="-H windowsgui -s -w" -o build/claude-workbench-go.exe .
+
+      - name: Rename artifact
+        shell: bash
+        run: |
+          mv build/claude-workbench-go.exe "build/ClaudeWorkbench-Go-${{ steps.ver.outputs.version }}-x64.exe"
+
+      # 裸 exe，不做安装包：Go 版是单文件，复制即用
+      - name: Upload to release
+        working-directory: .
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v${{ steps.ver.outputs.version }}"
+          gh release upload "$tag" "go/build/ClaudeWorkbench-Go-${{ steps.ver.outputs.version }}-x64.exe" --clobber
+
+      - name: Assert uploaded
+        working-directory: .
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v${{ steps.ver.outputs.version }}"
+          names=$(gh release view "$tag" --json assets -q '.assets[].name' || true)
+          echo "ASSET_NAMES=[$names]"
+          echo "$names" | grep -q -- "ClaudeWorkbench-Go-.*-x64.exe" || { echo "缺少 Go 版产物"; exit 1; }

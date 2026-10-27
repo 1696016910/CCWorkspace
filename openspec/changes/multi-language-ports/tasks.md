@@ -10,9 +10,9 @@
 
 ## 2. CI 拆分
 
-- [ ] 2.1 把 `.github/workflows/release.yml` 拆为 `release-node.yml`（只构建 Node 版），修正其中所有路径为 `node/` 前缀、`working-directory` 为 `node`。验证：本地 `npx js-yaml` 解析通过；`workflow_dispatch` 手动触发后 Node 产物上传成功
-- [ ] 2.2 新建 `release-go.yml` 与 `release-rust.yml` 骨架，先只做 `workflow_dispatch` 手动触发，各自 `setup-go` / `setup-rust` 并跑构建命令。验证：两份文件 `js-yaml` 解析通过；手动触发能跑到构建步骤（此时产物可为空）
-- [ ] 2.3 三份 workflow 统一产物命名前缀 `ClaudeWorkbench-Node|Go|Rust-<version>-<arch>.<ext>`，避免同名文件在同一 Release 内冲突。验证：三个 workflow 的 `artifactName` 互不相同，`grep` 确认无重复
+- [x] 2.1 把 `.github/workflows/release.yml` 拆为 `release-node.yml`（只构建 Node 版），修正其中所有路径为 `node/` 前缀、`working-directory` 为 `node`。验证：本地 `npx js-yaml` 解析通过；`workflow_dispatch` 手动触发后 Node 产物上传成功
+- [x] 2.2 新建 `release-go.yml` 与 `release-rust.yml` 骨架，先只做 `workflow_dispatch` 手动触发，各自 `setup-go` / `setup-rust` 并跑构建命令。验证：两份文件 `js-yaml` 解析通过；手动触发能跑到构建步骤（此时产物可为空）
+- [x] 2.3 三份 workflow 统一产物命名前缀 `ClaudeWorkbench-Node|Go|Rust-<version>-<arch>.<ext>`，避免同名文件在同一 Release 内冲突。验证：三个 workflow 的 `artifactName` 互不相同，`grep` 确认无重复
 
 ## 3. 协议文档
 
