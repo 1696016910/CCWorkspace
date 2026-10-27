@@ -37,27 +37,56 @@ jobs:
           tag="${{ steps.tag.outputs.tag }}"
           echo "目标 tag: $tag"
 
-          # 先确认远端确实有这个 tag（本地 tag 推没推上去是另一回事）
-          if ! git ls-remote --tags origin "refs/tags/$tag" | grep -q .; then
+          # 绑定构建与 tag：确认这次构建确实是为这个 tag 跑的，
+          # 且 tag 指向的提交就是当前检出的提交。
+          # 否则产物可能与 tag 上的源码对不上（供应链风险）。
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" != "$tag" ]]; then
+            echo "::error::当前触发的是 tag ${GITHUB_REF_NAME}，与 package.json 版本 $tag 不一致"
+            exit 1
+          fi
+
+          remote_sha=$(git ls-remote --tags origin "refs/tags/$tag^{}" | cut -f1)
+          if [ -z "$remote_sha" ]; then
+            remote_sha=$(git ls-remote --tags origin "refs/tags/$tag" | cut -f1)
+          fi
+          if [ -z "$remote_sha" ]; then
             echo "::error::远端不存在 tag $tag，请先推送 tag 再触发发布"
             exit 1
           fi
-          echo "tag 已存在于远端"
 
-          # 显式判断：view 成功 = Release 已存在；失败才创建
-          if gh release view "$tag" >/dev/null 2>&1; then
+          head_sha=$(git rev-parse HEAD)
+          if [ "$remote_sha" != "$head_sha" ]; then
+            echo "::error::tag $tag 指向 $remote_sha，但当前构建的是 $head_sha"
+            exit 1
+          fi
+          echo "tag $tag 与检出提交一致：$head_sha"
+
+          # 用 API 直接判断 Release 是否存在。
+          # 不能用 `gh release view` 的退出码：tag 存在但没有 Release 时，
+          # 它可能仍然返回 0，导致我们误判"已存在"而跳过创建，
+          # 于是产物无处可传、整条发布链假绿。
+          check_release() {
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$tag" >/dev/null 2>&1
+          }
+
+          if check_release; then
             echo "Release 已存在，跳过创建"
           else
             echo "Release 不存在，正在创建"
             gh release create "$tag" --verify-tag --title "$tag" --notes "自动化构建产物"
           fi
 
-          # 无论走哪条路，最后都验证一次：Release 必须真的存在
-          if ! gh release view "$tag" >/dev/null 2>&1; then
-            echo "::error::Release $tag 创建后仍不可见"
-            exit 1
-          fi
-          echo "Release 就绪: https://github.com/${GITHUB_REPOSITORY}/releases/tag/$tag"
+          # 创建后再用同一个 API 验证一次
+          for i in 1 2 3 4 5; do
+            if check_release; then
+              echo "Release 就绪: https://github.com/${GITHUB_REPOSITORY}/releases/tag/$tag"
+              exit 0
+            fi
+            echo "第 $i 次确认未就绪，2 秒后重试…"
+            sleep 2
+          done
+          echo "::error::Release $tag 创建后仍查不到"
+          exit 1
 
   build:
     needs: prepare
