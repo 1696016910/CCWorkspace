@@ -61,28 +61,34 @@ jobs:
           fi
           echo "tag $tag 与检出提交一致：$head_sha"
 
-          # 用 API 直接判断 Release 是否存在。
-          # 不能用 `gh release view` 的退出码：tag 存在但没有 Release 时，
-          # 它可能仍然返回 0，导致我们误判"已存在"而跳过创建，
-          # 于是产物无处可传、整条发布链假绿。
+          # 预建 Release，避免三个平台并发创建时 electron-builder 收到 422。
+          # 必须用 --draft=false 建正式版：gh 默认创建的是 draft，
+          # 而 electron-builder 遇到 draft Release 会走另一条分支，
+          # 导致 --publish always 静默不上传（产物为空）。
           check_release() {
             gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$tag" >/dev/null 2>&1
           }
 
           if check_release; then
-            echo "Release 已存在，跳过创建"
+            is_draft=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$tag" --jq '.draft')
+            if [ "$is_draft" = "true" ]; then
+              echo "已有的 Release 是 draft，删除后重建为正式版"
+              gh release delete "$tag" --yes --cleanup-tag=false || true
+              gh release create "$tag" --draft=false --title "$tag" --notes "自动化构建产物"
+            else
+              echo "Release 已存在且为正式版，继续"
+            fi
           else
-            echo "Release 不存在，正在创建"
-            gh release create "$tag" --verify-tag --title "$tag" --notes "自动化构建产物"
+            echo "创建正式版 Release"
+            gh release create "$tag" --draft=false --title "$tag" --notes "自动化构建产物"
           fi
 
-          # 创建后再用同一个 API 验证一次
+          # 创建后确认
           for i in 1 2 3 4 5; do
             if check_release; then
               echo "Release 就绪: https://github.com/${GITHUB_REPOSITORY}/releases/tag/$tag"
               exit 0
             fi
-            echo "第 $i 次确认未就绪，2 秒后重试…"
             sleep 2
           done
           echo "::error::Release $tag 创建后仍查不到"
