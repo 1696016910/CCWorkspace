@@ -18,12 +18,17 @@ win:
   target:
     - target: nsis
       arch: [x64]
+    # portable 是免安装单文件：解压到临时目录直接跑，不进注册表、不需要管理员
+    - target: portable
+      arch: [x64]
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   # 卸载时询问是否一并删除用户数据
   deleteAppDataOnUninstall: false
+portable:
+  artifactName: ClaudeWorkbench-Node-${version}-${arch}-portable.${ext}
 mac:
   # zip 是 Squirrel.Mac 自更新的必要产物，dmg 不能用于自动更新
   # 同时产出 arm64 与 x64：GitHub 的 macos-latest 是 arm64，

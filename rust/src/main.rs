@@ -13,7 +13,8 @@ use model::*;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
-const VERSION: &str = "0.2.1";
+// 从 Cargo.toml 取版本：硬编码常量会和 Cargo.toml 各升各的，迟早对不上
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {

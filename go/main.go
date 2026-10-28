@@ -6,19 +6,22 @@ package main
 
 import (
 	"claude-workbench/internal/app"
+	_ "embed"
 	"encoding/json"
-	"os"
 )
 
+// 用 go:embed 而不是运行时读文件：双击启动时 cwd 不是程序所在目录，
+// 读 version.json 必然失败，界面上会一直显示 v0.0.0。
+//
+//go:embed version.json
+var versionJSON []byte
+
 func main() {
-	// 版本号从 version.json 读，与 CI 保持同一来源
-	if raw, err := os.ReadFile("version.json"); err == nil {
-		var v struct {
-			Version string `json:"version"`
-		}
-		if json.Unmarshal(raw, &v) == nil && v.Version != "" {
-			app.Version = v.Version
-		}
+	var v struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(versionJSON, &v) == nil && v.Version != "" {
+		app.Version = v.Version
 	}
 	app.Run()
 }

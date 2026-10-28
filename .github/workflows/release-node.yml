@@ -133,6 +133,7 @@ jobs:
           echo "ASSET_NAMES=[$names]"
           if [[ "${{ matrix.args }}" == "--win" ]]; then
             echo "$names" | grep -q -- "ClaudeWorkbench-Node-.*-x64.exe" || { echo "缺少 Node 版 Windows 安装包"; exit 1; }
+            echo "$names" | grep -q -- "ClaudeWorkbench-Node-.*-portable.exe" || { echo "缺少 Node 版 Windows 免安装包"; exit 1; }
           elif [[ "${{ matrix.args }}" == "--linux" ]]; then
             echo "$names" | grep -q -- "ClaudeWorkbench-Node-.*\.AppImage" || { echo "缺少 Node 版 AppImage"; exit 1; }
           else
