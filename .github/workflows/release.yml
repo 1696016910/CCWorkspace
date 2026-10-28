@@ -1,0 +1,66 @@
+name: Release
+
+# 打 v* tag 时自动构建并上传安装包
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # 版本号以 package.json 为准，tag 必须与之一致，避免产物名和 tag 对不上
+      - name: Verify version matches tag
+        shell: bash
+        run: |
+          ver=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+          echo "package.json=$ver tag=$tag"
+          if [ "$ver" != "$tag" ]; then
+            echo "❌ package.json 版本 ($ver) 与 tag ($tag) 不一致"
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - name: Build
+        run: npm run tauri:build
+
+      - name: Assert artifacts exist
+        shell: bash
+        run: |
+          ls -la src-tauri/target/release/bundle/nsis/
+          file=$(find src-tauri/target/release/bundle/nsis -name '*.exe' | head -1)
+          if [ -z "$file" ]; then
+            echo "❌ 没有生成安装包"
+            exit 1
+          fi
+          echo "✅ $file"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/target/release/bundle/nsis/*.exe
+          fail_on_unmatched_files: true

@@ -1,0 +1,41 @@
+{
+  "name": "claude-workbench",
+  "version": "0.2.1",
+  "description": "Claude Code CLI 的会话与配置管理外壳",
+  "author": "JianZhou",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/1696016910/CCWorkspace.git"
+  },
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "dompurify": "^3.2.4",
+    "highlight.js": "^11.11.1",
+    "marked": "^15.0.7",
+    "pinia": "^3.0.1",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^26.6.5",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "jsdom": "^26.0.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11",
+    "vitest": "^3.0.5",
+    "vue-tsc": "^2.2.0"
+  }
+}

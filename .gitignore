@@ -1,13 +1,12 @@
 # 依赖与构建产物
 node_modules/
 dist/
-dist-electron/
-out/
-# 各实现的打包产物；不加前导斜杠会连 .claude/skills/release/ 一起忽略
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# 打包产物
 /release/
-node/release/
-go/build/
-rust/target/
+portable/
 *.tsbuildinfo
 
 # 临时文件（规则要求放 temp/ 且用完即删）
@@ -28,7 +27,3 @@ Thumbs.db
 
 # 配置备份（可能含令牌）
 backups/
-
-# 免安装副本（只保留 release/ 一份产物）
-portable/
-dist-final/
