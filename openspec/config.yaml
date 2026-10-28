@@ -1,32 +1,51 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  ## 技术栈
+  外壳：Tauri 2（Rust 后端 + 系统 WebView 前端）
+  界面：Vue 3 + TypeScript 5 + Vite
+  数据：SQLite（rusqlite，bundled 编译进二进制）
+  包管理：npm。测试：cargo test（后端）+ Vitest（前端）
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  ## 目录约定
+  前端界面：src/ 下按用途分组（接口封装 / 组件 / 弹窗 / 设置分区 / 状态 / 工具）
+  IPC 命令：src-tauri/src/main.rs，一个命令一个函数，命名用下划线
+  业务逻辑：src-tauri/src 下的 service.rs、config.rs、skills.rs
+  数据访问：src-tauri/src/db.rs，只有这一层能拿到数据库连接
+  外部进程：src-tauri/src/claude.rs，唯一启动 claude 子进程的地方
+  数据库结构：db.rs 里的迁移脚本，版本号只增不改
 
-# Per-operation guidance (optional)
-# Add advisory guidance for how apply and archive work should be conducted.
-# This is separate from artifact rules above.
-# Example:
-#   operations:
-#     apply:
-#       guidance:
-#         - Keep test summaries concise
-#     archive:
-#       guidance:
-#         - Summarize the archive outcome before finishing
+  ## 架构红线
+  组件不得直接调 IPC，必须经接口封装层统一收口
+  前端不做业务判断，逻辑下沉到状态层或后端
+  业务层不碰界面与网络，只接收参数、返回传输对象
+  后端命令不得直接返回数据库实体，一律转成传输对象
+  对外错误必须是可读中文，不透出内部堆栈或 SQL 片段
+  写配置文件前必须备份；解析失败时拒绝覆盖，否则会抹掉用户已有配置
+
+  ## 交付要求
+  每条新增命令至少一个后端用例覆盖正常流程，异常分支也要有用例
+  改前端组件后必须跑一次完整构建，类型检查查不出模块路径错误
+  任务清单里必须有"测试"这一组，不许把测试留给人工
+
+  ## 规范用词（要求标题与正文统一）
+  任务（不用"工单"）、负责人（不用"经办人"）
+  项目成员（不用"协作者"）
+  状态四选一：待办 / 进行中 / 阻塞 / 完成，不要另造新词
+
+rules:
+  proposal:
+    - 提案正文控制在 500 字以内
+    - "变更内容"一节必须写一行"不做的事情"
+  tasks:
+    - 单个任务控制在 2 小时以内
+    - 最后一组必须是"测试"
+
+operations:
+  apply:
+    guidance:
+      - 每完成一个任务就更新任务清单的勾选，不要攒到最后一起改
+      - 改了后端必须跑后端测试；改了前端必须跑完整构建
+  archive:
+    guidance:
+      - 归档前确认后端测试与前端构建都通过
