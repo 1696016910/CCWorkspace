@@ -3,8 +3,8 @@ import { ref } from 'vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSessionStore } from '@/stores/session'
 import { useToast } from '@/composables/useToast'
-import ConfirmDialog from '../ConfirmDialog.vue'
-import NewWorkspaceDialog from '../NewWorkspaceDialog.vue'
+import ConfirmDialog from '../dialogs/ConfirmDialog.vue'
+import NewWorkspaceDialog from '../dialogs/NewWorkspaceDialog.vue'
 
 const ws = useWorkspaceStore()
 const sessions = useSessionStore()

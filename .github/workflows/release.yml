@@ -44,6 +44,10 @@ jobs:
 
       - run: npm test
 
+      # 先单独跑一次前端构建：typecheck 只查类型，
+      # 模块路径写错时它不会报错，要到 vite build 才暴露
+      - run: npm run build
+
       - name: Build
         run: npm run tauri:build
 

@@ -1,6 +1,6 @@
 # claude CLI 进程协议
 
-三份实现（Node / Go / Rust）共用这套协议。Go 与 Rust 不依赖任何 SDK，直接管理子进程并解析 stdout。
+后端（Rust）不依赖任何 SDK，直接管理 claude 子进程并解析 stdout。
 
 > 本文档的每一条都来自实测，不是推测。样本见文末。
 

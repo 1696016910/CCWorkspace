@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
@@ -21,5 +22,10 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: false
+  },
+  // 测试配置与构建配置共用同一份 alias/plugins，不再单独维护 vitest.config.ts
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.test.ts']
   }
 })

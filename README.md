@@ -26,7 +26,9 @@ Claude Code CLI 的图形外壳：把终端里的会话、工作区、配置、�
 .
 ├── src/                     前端（Vue 3）
 │   ├── api/                 IPC 封装，与后端命令一一对应
-│   ├── components/          Sidebar / ChatPane / SettingsPage / 各弹窗
+│   ├── components/          主界面组件（Sidebar / ChatPane / MessageItem）
+│   │   ├── dialogs/         弹窗与浮层（确认 / 新建工作区 / 回收站 / 文件预览 / 上下文）
+│   │   └── settings/        设置页 8 个分区
 │   ├── stores/              Pinia：workspace / session / chat
 │   ├── styles/              设计令牌与全局样式
 │   ├── utils/               Markdown 渲染、主题
@@ -43,10 +45,10 @@ Claude Code CLI 的图形外壳：把终端里的会话、工作区、配置、�
 │   │   └── file.rs          工作区内文件读取
 │   ├── icons/               应用图标（多尺寸）
 │   └── tauri.conf.json
+├── assets/                  图标源图（1024px，用 tauri icon 生成全套）
 ├── prototype/               设计稿（改 UI 时对照）
 ├── docs/                    claude CLI stdio 协议说明
-├── openspec/                规格与变更记录
-└── build/                   图标源文件
+└── openspec/                规格与变更记录
 ```
 
 ---
@@ -72,6 +74,14 @@ cd src-tauri && cargo test   # 后端
 ```
 
 ---
+
+## 图标
+
+改了 `assets/icon-source.png` 后重新生成全套尺寸：
+
+```bash
+npx tauri icon assets/icon-source.png -o src-tauri/icons
+```
 
 ## 打包
 
