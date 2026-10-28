@@ -6,6 +6,8 @@
 mod claude;
 mod db;
 mod model;
+mod icons;
+mod markdown;
 mod service;
 mod theme;
 
@@ -74,6 +76,8 @@ fn install_cjk_font(ctx: &egui::Context) {
 
 /// 会话右键菜单选中的动作。
 enum SessionAction {
+    /// 打开「更多」菜单：(id, 名称, 是否置顶, 是否工作区)
+    Menu(String, String, bool, bool),
     Rename(String, String),
     Pin(String, bool),
     Duplicate(String),
@@ -113,6 +117,9 @@ struct App {
     new_ws_name: String,
     pending_delete: Option<(String, String, bool)>, // (id, 名称, 是工作区)
     renaming: Option<(String, String, bool)>,       // (id, 当前名称, 是工作区)
+
+    // 右键/更多菜单的目标
+    menu_target: Option<(String, String, bool, bool)>,
 
     // 外观与侧栏角标
     dark: bool,
@@ -156,6 +163,7 @@ impl App {
             new_ws_name: String::new(),
             pending_delete: None,
             renaming: None,
+            menu_target: None,
             dark: false,
             trash_count: 0,
             show_context: false,
@@ -176,18 +184,28 @@ impl App {
             Ok(c) => {
                 app.conn = Some(c);
                 app.reload();
-                // 默认选中第一个工作区，否则侧栏只剩两行空壳
-                app.current_ws = app.workspaces.first().map(|w| w.id.clone());
-                app.current_ses = app
-                    .sessions
-                    .iter()
-                    .find(|s| app.current_ws.as_deref() == Some(s.workspace_id.as_str()))
-                    .map(|s| s.id.clone());
+                // 默认落在最近更新的会话上，启动就能看到内容而不是空白
+                app.current_ses = app.sessions.first().map(|s| s.id.clone());
+                app.current_ws = app
+                    .current_ses
+                    .as_ref()
+                    .and_then(|id| app.sessions.iter().find(|s| &s.id == id))
+                    .map(|s| s.workspace_id.clone())
+                    .or_else(|| app.workspaces.first().map(|w| w.id.clone()));
                 app.load_messages();
             }
             Err(e) => app.db_error = Some(e),
         }
         app
+    }
+
+    /// 当前调色板。所有绘制都从这里取，切暗色才能整体生效。
+    fn pal(&self) -> theme::Pal {
+        if self.dark {
+            theme::DARK
+        } else {
+            theme::LIGHT
+        }
     }
 
     fn reload(&mut self) {
@@ -561,12 +579,129 @@ impl App {
         }
     }
 
+    /// 「更多」菜单：工作区与会话共用。设计稿 .menu-pop 190px、9px 圆角。
+    fn render_row_menu(&mut self, ctx: &egui::Context) {
+        let Some((id, name, pinned, is_ws)) = self.menu_target.clone() else { return };
+        let pal = self.pal();
+        let mut open = true;
+        let mut picked: Option<&'static str> = None;
+
+        egui::Window::new("menu_row")
+            .title_bar(false)
+            .resizable(false)
+            .fixed_size(egui::vec2(190.0, 0.0))
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .frame(
+                egui::Frame::popup(&ctx.style())
+                    .fill(pal.surface)
+                    .stroke(egui::Stroke::new(1.0_f32, pal.line2))
+                    .rounding(egui::Rounding::same(9.0))
+                    .inner_margin(egui::Margin::same(5.0)),
+            )
+            .show(ctx, |ui| {
+                let item = |ui: &mut egui::Ui, label: &str, danger: bool| -> bool {
+                    let h = 30.0;
+                    let (rect, resp) =
+                        ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::click());
+                    if resp.hovered() {
+                        let bg = if danger { pal.danger_bg } else { pal.bg_hover };
+                        theme::round_rect(ui, rect, 6, bg, None);
+                    }
+                    let col = if danger {
+                        pal.danger_t
+                    } else if resp.hovered() {
+                        pal.t1
+                    } else {
+                        pal.t2
+                    };
+                    ui.painter().text(
+                        egui::pos2(rect.left() + 10.0, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        label,
+                        theme::font(12.5),
+                        col,
+                    );
+                    resp.clicked()
+                };
+
+                if item(ui, "重命名", false) {
+                    picked = Some("rename");
+                }
+                let pin_label = if pinned { "取消置顶" } else { "置顶" };
+                if item(ui, pin_label, false) {
+                    picked = Some("pin");
+                }
+                if !is_ws && item(ui, "复制会话", false) {
+                    picked = Some("dup");
+                }
+                if !is_ws {
+                    ui.add_space(4.0);
+                    let r = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 1.0),
+                        egui::Sense::hover(),
+                    );
+                    ui.painter()
+                        .hline(r.0.x_range(), r.0.center().y, egui::Stroke::new(1.0_f32, pal.line));
+                    ui.add_space(4.0);
+                }
+                if item(ui, if is_ws { "移除工作区" } else { "删除会话" }, true) {
+                    picked = Some("del");
+                }
+            });
+
+        // 点窗口外就关
+        if ctx.input(|i| i.pointer.any_click()) && !ctx.is_pointer_over_area() {
+            open = false;
+        }
+
+        if let Some(action) = picked {
+            self.menu_target = None;
+            match (action, is_ws) {
+                ("rename", _) => self.renaming = Some((id.clone(), name.clone(), is_ws)),
+                ("pin", true) => {
+                    if let Some(c) = &self.conn {
+                        match service::pin_workspace(c, &id, !pinned) {
+                            Ok(()) => self.reload(),
+                            Err(e) => self.status = e,
+                        }
+                    }
+                }
+                ("pin", false) => {
+                    if let Some(c) = &self.conn {
+                        match service::pin_session(c, &id, !pinned) {
+                            Ok(()) => self.reload(),
+                            Err(e) => self.status = e,
+                        }
+                    }
+                }
+                ("dup", _) => {
+                    if let Some(c) = &self.conn {
+                        match service::duplicate_session(c, &id) {
+                            Ok(_) => self.reload(),
+                            Err(e) => self.status = e,
+                        }
+                    }
+                }
+                ("del", true) => {
+                    self.pending_delete = Some((id.clone(), name.clone(), true))
+                }
+                ("del", false) => {
+                    self.pending_delete = Some((id.clone(), name.clone(), false))
+                }
+                _ => {}
+            }
+        }
+        if !open {
+            self.menu_target = None;
+        }
+    }
+
     /// 删除确认弹窗。主界面和设置页共用。
     // ════════════════ 设计稿界面 ════════════════
     // 尺寸/颜色/间距逐项对照 prototype/20261027-界面原型.html
 
     fn render_sidebar(&mut self, ctx: &egui::Context) {
-        let pal = theme::LIGHT;
+        let pal = self.pal();
         egui::SidePanel::left("sidebar")
             .resizable(false)
             .exact_width(theme::SIDEBAR_W)
@@ -581,10 +716,18 @@ impl App {
                 let btn_resp = ui.allocate_rect(btn_rect, egui::Sense::click());
                 let fill = if btn_resp.hovered() { pal.green_h } else { pal.green };
                 theme::round_rect(ui, btn_rect, 8, fill, None);
+                icons::plus(
+                    ui.painter(),
+                    egui::Rect::from_center_size(
+                        egui::pos2(btn_rect.center().x - 40.0, btn_rect.center().y),
+                        egui::vec2(15.0, 15.0),
+                    ),
+                    Color32::WHITE,
+                );
                 ui.painter().text(
-                    btn_rect.center(),
+                    egui::pos2(btn_rect.center().x + 6.0, btn_rect.center().y),
                     egui::Align2::CENTER_CENTER,
-                    "＋  新建工作区",
+                    "新建工作区",
                     theme::font(theme::F_NEW_WS),
                     Color32::WHITE,
                 );
@@ -609,80 +752,115 @@ impl App {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for w in &workspaces {
+                            let expanded = cur_ws.as_deref() == Some(w.id.as_str());
+                            let count =
+                                sessions.iter().filter(|s| s.workspace_id == w.id).count();
                             // .ws-head padding:7px 8px; margin:0 8px; radius:7px
                             let row = egui::Rect::from_min_size(
                                 egui::pos2(ui.min_rect().left() + 8.0, ui.cursor().top()),
                                 egui::vec2(theme::SIDEBAR_W - 16.0, 30.0),
                             );
                             let resp = ui.allocate_rect(row, egui::Sense::click());
-                            if resp.hovered() {
+                            let hot = resp.hovered();
+                            if hot {
                                 theme::round_rect(ui, row, 7, pal.bg_hover, None);
                             }
-                            {
-                                let p = ui.painter();
-                                p.text(
-                                    egui::pos2(row.left() + 10.0, row.center().y),
-                                    egui::Align2::CENTER_CENTER,
-                                    "v",
-                                    theme::font(9.0),
-                                    pal.t4,
-                                );
-                                p.text(
-                                    egui::pos2(row.left() + 28.0, row.center().y),
-                                    egui::Align2::CENTER_CENTER,
-                                    "▪",
-                                    theme::font(11.0),
-                                    pal.t3,
-                                );
+
+                            // .ws-tri 14x14 —— 展开用下箭头，收起用右箭头
+                            let tri = egui::Rect::from_center_size(
+                                egui::pos2(row.left() + 13.0, row.center().y),
+                                egui::vec2(14.0, 14.0),
+                            );
+                            if expanded {
+                                icons::chevron_down(ui.painter(), tri, pal.t4);
+                            } else {
+                                icons::chevron_right(ui.painter(), tri, pal.t4);
                             }
-                            let count = sessions.iter().filter(|s| s.workspace_id == w.id).count();
+                            // .ws-ico 15x15 文件夹
+                            icons::folder(
+                                ui.painter(),
+                                egui::Rect::from_center_size(
+                                    egui::pos2(row.left() + 31.0, row.center().y),
+                                    egui::vec2(15.0, 15.0),
+                                ),
+                                pal.t3,
+                            );
+
+                            // 右侧按钮区先算好位置，名称的可用宽度要避开它
+                            let add_rect = egui::Rect::from_center_size(
+                                egui::pos2(row.right() - 13.0, row.center().y),
+                                egui::vec2(24.0, 24.0),
+                            );
+                            let more_rect = egui::Rect::from_center_size(
+                                egui::pos2(row.right() - 38.0, row.center().y),
+                                egui::vec2(24.0, 24.0),
+                            );
+                            // 有会话时显示数量气泡，否则让位给名称
+                            let cnt_rect = egui::Rect::from_center_size(
+                                egui::pos2(row.right() - 38.0, row.center().y),
+                                egui::vec2(22.0, 16.0),
+                            );
+
+                            // .ws-name 13px 500
+                            let name_x = row.left() + 44.0;
+                            let name_right = if hot { more_rect.left() } else { cnt_rect.left() };
                             let name_galley = theme::ellipsis(
                                 ui,
                                 &w.name,
                                 theme::font(theme::F_WS_NAME),
                                 pal.t1,
-                                row.width() - 100.0,
+                                (name_right - name_x - 6.0).max(20.0),
                             );
                             ui.painter().galley(
                                 egui::pos2(
-                                    row.left() + 44.0,
+                                    name_x,
                                     row.center().y - name_galley.size().y / 2.0,
                                 ),
                                 name_galley,
                                 pal.t1,
                             );
-                            // .ws-count 11px bg-soft radius:8px
-                            let cnt_rect = egui::Rect::from_center_size(
-                                egui::pos2(row.right() - 34.0, row.center().y),
-                                egui::vec2(20.0, 16.0),
-                            );
-                            theme::round_rect(ui, cnt_rect, 8, pal.bg_soft, None);
-                            ui.painter().text(
-                                cnt_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                count.to_string(),
-                                theme::font(theme::F_WS_COUNT),
-                                pal.t4,
-                            );
-                            // .row-btn.add：hover 才显示
-                            let add_rect = egui::Rect::from_center_size(
-                                egui::pos2(row.right() - 12.0, row.center().y),
-                                egui::vec2(24.0, 24.0),
-                            );
+
                             let add_resp = ui.interact(
                                 add_rect,
                                 ui.id().with(("ws-add", w.id.as_str())),
                                 egui::Sense::click(),
                             );
-                            if resp.hovered() || add_resp.hovered() {
-                                let c = if add_resp.hovered() { pal.green_t } else { pal.green };
-                                ui.painter().text(
-                                    add_rect.center(),
-                                    egui::Align2::CENTER_CENTER,
-                                    "＋",
-                                    theme::font(15.0),
-                                    c,
+                            let more_resp = ui.interact(
+                                more_rect,
+                                ui.id().with(("ws-more", w.id.as_str())),
+                                egui::Sense::click(),
+                            );
+
+                            if hot {
+                                // .row-btn.add 与 .row-btn.more 只在 hover 时出现
+                                icons::plus(ui.painter(), add_rect, pal.green);
+                                icons::more(ui.painter(), more_rect, pal.t3);
+                            } else if count > 0 {
+                                // .ws-count 11px bg-soft radius:8px
+                                let cr = egui::Rect::from_center_size(
+                                    cnt_rect.center(),
+                                    egui::vec2(
+                                        (count.to_string().len() as f32 * 6.0 + 10.0).max(20.0),
+                                        16.0,
+                                    ),
                                 );
+                                theme::round_rect(ui, cr, 8, pal.bg_soft, None);
+                                ui.painter().text(
+                                    cr.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    count.to_string(),
+                                    theme::font(theme::F_WS_COUNT),
+                                    pal.t4,
+                                );
+                            }
+
+                            if more_resp.clicked() {
+                                ws_action = Some(SessionAction::Menu(
+                                    w.id.clone(),
+                                    w.name.clone(),
+                                    w.pinned_at.is_some(),
+                                    true,
+                                ));
                             }
                             if add_resp.clicked() {
                                 self.current_ws = Some(w.id.clone());
@@ -696,38 +874,27 @@ impl App {
                                     }
                                 }
                             }
-                            if resp.clicked() {
-                                self.current_ws = Some(w.id.clone());
-                                self.current_ses = None;
-                                self.messages.clear();
+                            if resp.clicked() && !add_resp.clicked() && !more_resp.clicked() {
+                                if expanded {
+                                    self.current_ws = None;
+                                    self.current_ses = None;
+                                    self.messages.clear();
+                                } else {
+                                    self.current_ws = Some(w.id.clone());
+                                    self.current_ses = None;
+                                    self.messages.clear();
+                                }
                             }
-                            resp.context_menu(|ui| {
-                                if ui.button("重命名").clicked() {
-                                    ws_action =
-                                        Some(SessionAction::Rename(w.id.clone(), w.name.clone()));
-                                    ui.close_menu();
-                                }
-                                let label = if w.pinned_at.is_some() { "取消置顶" } else { "置顶" };
-                                if ui.button(label).clicked() {
-                                    ws_action =
-                                        Some(SessionAction::Pin(w.id.clone(), w.pinned_at.is_none()));
-                                    ui.close_menu();
-                                }
-                                if ui.button("移除").clicked() {
-                                    ws_action =
-                                        Some(SessionAction::Delete(w.id.clone(), w.name.clone()));
-                                    ui.close_menu();
-                                }
-                            });
 
                             // .chat-item margin:1px 8px 1px 26px
-                            if cur_ws.as_deref() == Some(w.id.as_str()) {
+                            if expanded {
                                 let mine: Vec<SessionSummary> = sessions
                                     .iter()
                                     .filter(|s| s.workspace_id == w.id)
                                     .cloned()
                                     .collect();
                                 if mine.is_empty() {
+                                    // .ws-empty font-size:12px padding:10px 26px
                                     let r = egui::Rect::from_min_size(
                                         egui::pos2(ui.min_rect().left() + 26.0, ui.cursor().top()),
                                         egui::vec2(theme::SIDEBAR_W - 52.0, 20.0),
@@ -740,6 +907,7 @@ impl App {
                                         pal.t4,
                                     );
                                     ui.allocate_rect(r, egui::Sense::hover());
+                                    ui.add_space(10.0);
                                 }
                                 for s in &mine {
                                     let item = egui::Rect::from_min_size(
@@ -748,23 +916,47 @@ impl App {
                                     );
                                     let on = cur_ses.as_deref() == Some(s.id.as_str());
                                     let r = ui.allocate_rect(item, egui::Sense::click());
+                                    // .chat-item.on：bg green-soft，文字 green-500
                                     if on {
-                                        theme::round_rect(ui, item, 7, pal.green_soft, Some(egui::Stroke::new(1.0_f32, pal.green.gamma_multiply(0.45))));
+                                        theme::round_rect(ui, item, 7, pal.green_soft, None);
                                     } else if r.hovered() {
                                         theme::round_rect(ui, item, 7, pal.bg_hover, None);
                                     }
+
                                     let title = if s.title.is_empty() {
                                         "(新会话)"
                                     } else {
                                         s.title.as_str()
                                     };
-                                    let col = if on { pal.green } else { pal.t1 };
+                                    let col = if on { pal.green_t } else { pal.t1 };
+
+                                    // 右侧：hover 显示更多，否则显示相对时间 + 状态点
+                                    let dot_c = if s.running { pal.green } else { pal.line3 };
+                                    let dot_x = item.right() - 10.0;
+                                    let time_x = dot_x - 8.0;
+                                    let more_ses = egui::Rect::from_center_size(
+                                        egui::pos2(item.right() - 13.0, item.center().y),
+                                        egui::vec2(24.0, 24.0),
+                                    );
+                                    let ses_more = ui.interact(
+                                        more_ses,
+                                        ui.id().with(("ses-more", s.id.as_str())),
+                                        egui::Sense::click(),
+                                    );
+
+                                    let text_right = if (r.hovered() || ses_more.hovered())
+                                        || on
+                                    {
+                                        more_ses.left()
+                                    } else {
+                                        time_x - 14.0
+                                    };
                                     let g = theme::ellipsis(
                                         ui,
                                         title,
                                         theme::font(theme::F_CHAT),
                                         col,
-                                        item.width() - 60.0,
+                                        (text_right - item.left() - 8.0).max(20.0),
                                     );
                                     ui.painter().galley(
                                         egui::pos2(
@@ -774,117 +966,66 @@ impl App {
                                         g,
                                         col,
                                     );
-                                    let dot_c = if s.running { pal.green } else { pal.line3 };
-                                    ui.painter().circle_filled(
-                                        egui::pos2(item.right() - 10.0, item.center().y),
-                                        3.0,
-                                        dot_c,
-                                    );
-                                    if r.clicked() {
+
+                                    if r.hovered() || ses_more.hovered() || on {
+                                        icons::more(ui.painter(), more_ses, pal.t3);
+                                    } else {
+                                        // .chat-time 10.5px
+                                        ui.painter().text(
+                                            egui::pos2(time_x, item.center().y),
+                                            egui::Align2::RIGHT_CENTER,
+                                            relative_time(&s.updated_at),
+                                            theme::font(theme::F_CHAT_TIME),
+                                            pal.t4,
+                                        );
+                                        ui.painter().circle_filled(
+                                            egui::pos2(dot_x, item.center().y),
+                                            3.0,
+                                            dot_c,
+                                        );
+                                    }
+
+                                    if ses_more.clicked() {
+                                        ses_action = Some(SessionAction::Menu(
+                                            s.id.clone(),
+                                            title.to_string(),
+                                            s.pinned_at.is_some(),
+                                            false,
+                                        ));
+                                    } else if r.clicked() {
                                         self.current_ses = Some(s.id.clone());
                                         self.load_messages();
                                     }
-                                    r.context_menu(|ui| {
-                                        if ui.button("重命名").clicked() {
-                                            ses_action = Some(SessionAction::Rename(
-                                                s.id.clone(),
-                                                s.title.clone(),
-                                            ));
-                                            ui.close_menu();
-                                        }
-                                        let label = if s.pinned_at.is_some() {
-                                            "取消置顶"
-                                        } else {
-                                            "置顶"
-                                        };
-                                        if ui.button(label).clicked() {
-                                            ses_action = Some(SessionAction::Pin(
-                                                s.id.clone(),
-                                                s.pinned_at.is_none(),
-                                            ));
-                                            ui.close_menu();
-                                        }
-                                        if ui.button("复制会话").clicked() {
-                                            ses_action =
-                                                Some(SessionAction::Duplicate(s.id.clone()));
-                                            ui.close_menu();
-                                        }
-                                        if ui.button("删除").clicked() {
-                                            ses_action = Some(SessionAction::Delete(
-                                                s.id.clone(),
-                                                title.to_string(),
-                                            ));
-                                            ui.close_menu();
-                                        }
-                                    });
+                                    ui.add_space(2.0);
                                 }
                             }
-                            ui.add_space(6.0);
+                            ui.add_space(4.0);
                         }
                         ui.add_space(8.0);
                     });
 
-                match ws_action {
-                    Some(SessionAction::Rename(id, name)) => self.renaming = Some((id, name, true)),
-                    Some(SessionAction::Pin(id, pinned)) => {
-                        if let Some(c) = &self.conn {
-                            match service::pin_workspace(c, &id, pinned) {
-                                Ok(()) => self.reload(),
-                                Err(e) => self.status = e,
-                            }
-                        }
-                    }
-                    Some(SessionAction::Delete(id, name)) => {
-                        if let Some(c) = &self.conn {
-                            match service::remove_workspace(c, &id) {
-                                Ok(()) => {
-                                    self.current_ws = None;
-                                    self.reload();
-                                    self.status = format!("已移除「{name}」");
-                                }
-                                Err(e) => self.status = e,
-                            }
-                        }
-                    }
-                    _ => {}
+                // 工作区/会话的「更多」菜单
+                if let Some(SessionAction::Menu(id, name, pinned, is_ws)) = ws_action.take() {
+                    self.menu_target = Some((id, name, pinned, is_ws));
                 }
-                match ses_action {
-                    Some(SessionAction::Rename(id, title)) => self.renaming = Some((id, title, false)),
-                    Some(SessionAction::Pin(id, pinned)) => {
-                        if let Some(c) = &self.conn {
-                            match service::pin_session(c, &id, pinned) {
-                                Ok(()) => self.reload(),
-                                Err(e) => self.status = e,
-                            }
-                        }
-                    }
-                    Some(SessionAction::Duplicate(id)) => {
-                        if let Some(c) = &self.conn {
-                            match service::duplicate_session(c, &id) {
-                                Ok(_) => self.reload(),
-                                Err(e) => self.status = e,
-                            }
-                        }
-                    }
-                    Some(SessionAction::Delete(id, title)) => {
-                        self.pending_delete = Some((id, title, false))
-                    }
-                    None => {}
+                if let Some(SessionAction::Menu(id, name, pinned, is_ws)) = ses_action.take() {
+                    self.menu_target = Some((id, name, pinned, is_ws));
                 }
 
                 // .side-foot padding:8px border-top
                 theme::hline(ui, &pal);
                 ui.add_space(8.0);
                 let deleted_n = self.trash_count;
-                self.foot_btn(ui, &pal, "◑", "暗色模式", None, |me| {
-                    me.dark = !me.dark;
-                });
-                self.foot_btn(ui, &pal, "≡", "回收站", Some(deleted_n), |me| {
-                    me.open_trash();
-                });
-                self.foot_btn(ui, &pal, "⚙", "设置", None, |me| {
-                    me.open_settings();
-                });
+                if self.foot_btn(ui, &pal, FootIcon::Moon, "暗色模式", None) {
+                    self.dark = !self.dark;
+                    theme::apply(ctx, &self.pal());
+                }
+                if self.foot_btn(ui, &pal, FootIcon::Recycle, "回收站", Some(deleted_n)) {
+                    self.open_trash();
+                }
+                if self.foot_btn(ui, &pal, FootIcon::Gear, "设置", None) {
+                    self.open_settings();
+                }
                 ui.add_space(8.0);
             });
     }
@@ -894,11 +1035,10 @@ impl App {
         &mut self,
         ui: &mut egui::Ui,
         pal: &theme::Pal,
-        icon: &str,
+        icon: FootIcon,
         label: &str,
         badge: Option<usize>,
-        on_click: impl FnOnce(&mut Self),
-    ) {
+    ) -> bool {
         let row = egui::Rect::from_min_size(
             egui::pos2(ui.min_rect().left() + 8.0, ui.cursor().top()),
             egui::vec2(theme::SIDEBAR_W - 16.0, 34.0),
@@ -907,15 +1047,13 @@ impl App {
         if r.hovered() {
             theme::round_rect(ui, row, 7, pal.bg_hover, None);
         }
-        ui.painter().text(
-            egui::pos2(row.left() + 18.0, row.center().y),
-            egui::Align2::CENTER_CENTER,
-            icon,
-            theme::font(13.0),
-            pal.t3,
+        let ic = egui::Rect::from_center_size(
+            egui::pos2(row.left() + 17.0, row.center().y),
+            egui::vec2(15.0, 15.0),
         );
+        icon.draw(ui.painter(), ic, if r.hovered() { pal.t1 } else { pal.t3 });
         ui.painter().text(
-            egui::pos2(row.left() + 34.0, row.center().y),
+            egui::pos2(row.left() + 33.0, row.center().y),
             egui::Align2::LEFT_CENTER,
             label,
             theme::font(theme::F_FOOT),
@@ -937,14 +1075,12 @@ impl App {
                 );
             }
         }
-        if r.clicked() {
-            on_click(self);
-        }
+        r.clicked()
     }
 
     /// .composer-wrap padding:14px 28px 16px + .composer max-width:720px radius:14px
     fn render_composer(&mut self, ctx: &egui::Context) {
-        let pal = theme::LIGHT;
+        let pal = self.pal();
         egui::TopBottomPanel::bottom("composer")
             .frame(egui::Frame::none().fill(pal.bg))
             .show(ctx, |ui| {
@@ -1092,7 +1228,7 @@ impl App {
 
     /// .main-head 48px + .thread max-width:720px
     fn render_thread(&mut self, ctx: &egui::Context) {
-        let pal = theme::LIGHT;
+        let pal = self.pal();
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(pal.bg))
             .show(ctx, |ui| {
@@ -1124,49 +1260,74 @@ impl App {
                     .map(|w| w.name.clone())
                     .unwrap_or_default();
 
-                let title_w = ui.fonts(|f| {
-                    f.layout_no_wrap(title.clone(), theme::font(theme::F_MH_TITLE), pal.t1)
-                        .size()
-                        .x
-                });
-                ui.painter().text(
-                    egui::pos2(head.left() + 24.0, head.center().y),
-                    egui::Align2::LEFT_CENTER,
+                // .mh-title 14px 500，从 left+24 开始
+                let title_x = head.left() + 24.0;
+                let title_galley = theme::ellipsis(
+                    ui,
                     &title,
                     theme::font(theme::F_MH_TITLE),
                     pal.t1,
+                    head.width() - 200.0,
                 );
+                let title_w = title_galley.size().x;
+                ui.painter().galley(
+                    egui::pos2(title_x, head.center().y - title_galley.size().y / 2.0),
+                    title_galley,
+                    pal.t1,
+                );
+
+                // .mh-ws：文件夹图标 + 工作区名，11.5px，紧跟在标题后
                 if !ws_name.is_empty() {
+                    let wx = title_x + title_w + 10.0;
+                    let ic = egui::Rect::from_center_size(
+                        egui::pos2(wx + 5.5, head.center().y),
+                        egui::vec2(11.0, 11.0),
+                    );
+                    icons::folder(ui.painter(), ic, pal.t4);
                     ui.painter().text(
-                        egui::pos2(head.left() + 24.0 + title_w + 10.0, head.center().y),
+                        egui::pos2(wx + 16.0, head.center().y),
                         egui::Align2::LEFT_CENTER,
-                        format!("· {ws_name}"),
+                        &ws_name,
                         theme::font(theme::F_MH_WS),
                         pal.t4,
                     );
                 }
 
+                // 右侧三个图标按钮：从右往左 复制 / 回收站 / 更多
                 let mut x = head.right() - 24.0;
-                for (id, glyph) in [("del", "删"), ("trash", "回"), ("set", "设")] {
+                let mut icon_btns: Vec<(&str, egui::Rect)> = vec![];
+                for id in ["copy", "del"] {
                     let br = egui::Rect::from_center_size(
                         egui::pos2(x - 14.0, head.center().y),
                         egui::vec2(28.0, 28.0),
                     );
-                    let r = ui.interact(br, ui.id().with(("mh", id)), egui::Sense::click());
+                    icon_btns.push((id, br));
+                    x -= 32.0;
+                }
+                for (id, br) in &icon_btns {
+                    let r = ui.interact(*br, ui.id().with(("mh", *id)), egui::Sense::click());
                     if r.hovered() {
-                        theme::round_rect(ui, br, 6, pal.bg_hover, None);
+                        theme::round_rect(ui, *br, 6, pal.bg_hover, None);
                     }
-                    ui.painter().text(
-                        br.center(),
-                        egui::Align2::CENTER_CENTER,
-                        glyph,
-                        theme::font(14.0),
-                        if r.hovered() { pal.t1 } else { pal.t3 },
-                    );
+                    let col = if r.hovered() { pal.t1 } else { pal.t3 };
+                    let ic = egui::Rect::from_center_size(br.center(), egui::vec2(15.0, 15.0));
+                    match *id {
+                        "copy" => icons::copy(ui.painter(), ic, col),
+                        _ => icons::trash(ui.painter(), ic, col),
+                    }
                     if r.clicked() {
-                        match id {
-                            "set" => self.open_settings(),
-                            "trash" => self.open_trash(),
+                        match *id {
+                            "copy" => match &ses {
+                                Some(s) => {
+                                    if let Some(c) = &self.conn {
+                                        match service::duplicate_session(c, &s.id) {
+                                            Ok(_) => self.reload(),
+                                            Err(e) => self.status = e,
+                                        }
+                                    }
+                                }
+                                None => self.status = "请先选择一个会话".into(),
+                            },
                             _ => match &ses {
                                 Some(s) => {
                                     let t = if s.title.is_empty() {
@@ -1180,7 +1341,6 @@ impl App {
                             },
                         }
                     }
-                    x -= 32.0;
                 }
 
                 let body_top = head.bottom();
@@ -1316,6 +1476,7 @@ impl App {
                 });
         });
 
+        self.render_row_menu(ctx);
         self.render_delete_dialog(ctx);
         self.render_rename_dialog(ctx);
         self.render_trash(ctx);
@@ -1679,6 +1840,7 @@ impl eframe::App for App {
         self.render_composer(ctx);
         self.render_thread(ctx);
 
+        self.render_row_menu(ctx);
         self.render_context_panel(ctx);
         self.render_delete_dialog(ctx);
         self.render_trash(ctx);
@@ -1733,6 +1895,69 @@ impl eframe::App for App {
             }
         }
     }
+}
+
+/// 侧栏底部三个按钮的图标种类。
+#[derive(Clone, Copy)]
+enum FootIcon {
+    Moon,
+    Recycle,
+    Gear,
+}
+
+impl FootIcon {
+    fn draw(self, p: &egui::Painter, r: egui::Rect, c: Color32) {
+        match self {
+            FootIcon::Moon => icons::moon(p, r, c),
+            FootIcon::Recycle => icons::recycle(p, r, c),
+            FootIcon::Gear => icons::gear(p, r, c),
+        }
+    }
+}
+
+/// 把 ISO 时间转成设计稿里的相对时间：“5分钟前”“2小时前”“昨天”。
+///
+/// 解析失败时返回空串，不把原始 ISO 串怼到界面上。
+fn relative_time(iso: &str) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let Ok(t) = parse_iso(iso) else { return String::new() };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let diff = now - t;
+    match diff {
+        d if d < 60 => "刚刚".into(),
+        d if d < 3600 => format!("{}分钟前", d / 60),
+        d if d < 86400 => format!("{}小时前", d / 3600),
+        d if d < 172800 => "昨天".into(),
+        d if d < 2592000 => format!("{}天前", d / 86400),
+        d => format!("{}个月前", d / 2592000),
+    }
+}
+
+/// 解析 `2026-10-27T08:34:43.404Z` 这种 ISO 8601 → unix 秒。
+fn parse_iso(s: &str) -> Result<i64, ()> {
+    let b = s.as_bytes();
+    if b.len() < 19 {
+        return Err(());
+    }
+    let num = |a: usize, n: usize| -> i64 {
+        s.get(a..a + n).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0)
+    };
+    let (y, mo, d) = (num(0, 4), num(5, 2), num(8, 2));
+    let (h, mi, sec) = (num(11, 2), num(14, 2), num(17, 2));
+
+    // 公历转 days since epoch
+    let y0 = if mo <= 2 { y - 1 } else { y };
+    let era = if y0 >= 0 { y0 } else { y0 - 399 } / 400;
+    let yoe = y0 - era * 400;
+    let mp = (mo + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+
+    Ok(days * 86400 + h * 3600 + mi * 60 + sec)
 }
 
 /// 用户气泡：.msg-user .bubble radius:14px 14px 4px 14px bg-soft max-width:78%
@@ -1839,10 +2064,9 @@ fn draw_ai_message(
         y += 6.0;
     }
 
-    let galley = ui.fonts(|f| f.layout(m.text.clone(), theme::font(theme::F_AI), pal.t1, w));
-    let text_h = galley.size().y;
-    ui.painter().galley(egui::pos2(x, y), galley, pal.t1);
-    y += text_h;
+    // 正文按 Markdown 排版：段落/行内代码/围栏代码块/列表，
+    // 纯文本会让设计稿里的代码块和列表完全丢失
+    y += markdown::draw(ui, pal, &m.text, x, y, w);
 
     if m.stopped {
         y += 10.0;
