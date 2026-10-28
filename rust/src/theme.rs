@@ -30,6 +30,9 @@ pub struct Pal {
     pub danger_line: Color32,
     pub danger_t: Color32,
     pub blue: Color32,
+    pub surface2: Color32,
+    pub warn_bg: Color32,
+    pub warn_t: Color32,
 }
 
 const fn c(hex: u32) -> Color32 {
@@ -59,6 +62,9 @@ pub const LIGHT: Pal = Pal {
     danger_line: c(0xf2dedd),
     danger_t: c(0xa33c34),
     blue: c(0x1668c9),
+    surface2: c(0xfcfcfd),
+    warn_bg: c(0xfdf8ee),
+    warn_t: c(0x8a6420),
 };
 
 pub const DARK: Pal = Pal {
@@ -84,6 +90,9 @@ pub const DARK: Pal = Pal {
     danger_line: c(0x442e2e),
     danger_t: c(0xe8a9a4),
     blue: c(0x6aa8e8),
+    surface2: c(0x212126),
+    warn_bg: c(0x2b2418),
+    warn_t: c(0xd9b56a),
 };
 
 // 字号：原型用 px，egui 的 FontId 等价于 px

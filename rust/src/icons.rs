@@ -219,3 +219,158 @@ pub fn copy(p: &egui::Painter, r: Rect, color: Color32) {
     p.rect_filled(front, Rounding::same(2.0), Color32::TRANSPARENT);
     p.rect_stroke(front, Rounding::same(2.0), st);
 }
+
+/// 设置页导航图标。
+pub fn nav(p: &egui::Painter, r: Rect, color: Color32, kind: &str) {
+    let st = stroke(color, 1.7);
+    match kind {
+        "folder" => folder(p, r, color),
+        "list" => {
+            let c = r.center();
+            for dy in [-4.5, 0.0, 4.5] {
+                p.line_segment(
+                    [Pos2::new(c.x - 5.5, c.y + dy), Pos2::new(c.x + 5.5, c.y + dy)],
+                    st,
+                );
+            }
+        }
+        "shield" => {
+            let c = r.center();
+            poly(
+                p,
+                &[
+                    Pos2::new(c.x, c.y - 5.5),
+                    Pos2::new(c.x + 4.8, c.y - 2.6),
+                    Pos2::new(c.x + 4.8, c.y + 1.2),
+                    Pos2::new(c.x, c.y + 5.5),
+                    Pos2::new(c.x - 4.8, c.y + 1.2),
+                    Pos2::new(c.x - 4.8, c.y - 2.6),
+                    Pos2::new(c.x, c.y - 5.5),
+                ],
+                st,
+            );
+        }
+        "box" => {
+            let c = r.center();
+            p.rect_stroke(
+                Rect::from_center_size(c, Vec2::splat(10.0)),
+                Rounding::same(2.0),
+                st,
+            );
+            p.line_segment(
+                [Pos2::new(c.x - 2.5, c.y - 2.0), Pos2::new(c.x + 2.5, c.y - 2.0)],
+                st,
+            );
+            p.line_segment(
+                [Pos2::new(c.x - 2.5, c.y + 1.5), Pos2::new(c.x + 1.0, c.y + 1.5)],
+                st,
+            );
+        }
+        "spark" => {
+            let c = r.center();
+            poly(
+                p,
+                &[
+                    Pos2::new(c.x, c.y - 5.5),
+                    Pos2::new(c.x + 1.6, c.y - 1.6),
+                    Pos2::new(c.x + 5.5, c.y),
+                    Pos2::new(c.x + 1.6, c.y + 1.6),
+                    Pos2::new(c.x, c.y + 5.5),
+                    Pos2::new(c.x - 1.6, c.y + 1.6),
+                    Pos2::new(c.x - 5.5, c.y),
+                    Pos2::new(c.x - 1.6, c.y - 1.6),
+                    Pos2::new(c.x, c.y - 5.5),
+                ],
+                st,
+            );
+        }
+        "grid" => {
+            let c = r.center();
+            for (dx, dy) in [(-3.0, -3.0), (3.0, -3.0), (-3.0, 3.0), (3.0, 3.0)] {
+                p.rect_stroke(
+                    Rect::from_center_size(Pos2::new(c.x + dx, c.y + dy), Vec2::splat(5.0)),
+                    Rounding::same(1.5),
+                    st,
+                );
+            }
+        }
+        "globe" => {
+            let c = r.center();
+            p.circle_stroke(c, 5.5, st);
+            p.line_segment(
+                [Pos2::new(c.x - 5.5, c.y), Pos2::new(c.x + 5.5, c.y)],
+                st,
+            );
+            arc(p, c, 5.5, -1.1, 1.1, st);
+            arc(p, c, 5.5, std::f32::consts::PI - 1.1, std::f32::consts::PI + 1.1, st);
+        }
+        _ => {
+            // "up"：向上箭头 + 圆
+            let c = r.center();
+            p.circle_stroke(c, 5.5, st);
+            p.line_segment(
+                [Pos2::new(c.x, c.y + 3.5), Pos2::new(c.x, c.y - 3.5)],
+                st,
+            );
+            poly(
+                p,
+                &[
+                    Pos2::new(c.x - 2.2, c.y - 1.2),
+                    Pos2::new(c.x, c.y - 3.6),
+                    Pos2::new(c.x + 2.2, c.y - 1.2),
+                ],
+                st,
+            );
+        }
+    }
+}
+
+/// 关闭 ✕。
+pub fn close(p: &egui::Painter, r: Rect, color: Color32) {
+    let c = r.center();
+    let st = stroke(color, 2.0);
+    for (a, b) in [(-4.0, 4.0), (-4.0, -4.0)] {
+        let _ = a;
+        let _ = b;
+    }
+    p.line_segment(
+        [Pos2::new(c.x - 4.0, c.y - 4.0), Pos2::new(c.x + 4.0, c.y + 4.0)],
+        st,
+    );
+    p.line_segment(
+        [Pos2::new(c.x + 4.0, c.y - 4.0), Pos2::new(c.x - 4.0, c.y + 4.0)],
+        st,
+    );
+}
+
+/// 返回箭头 ←
+pub fn back(p: &egui::Painter, r: Rect, color: Color32) {
+    let c = r.center();
+    let st = stroke(color, 2.0);
+    p.line_segment(
+        [Pos2::new(c.x + 3.5, c.y - 4.0), Pos2::new(c.x - 3.5, c.y)],
+        st,
+    );
+    p.line_segment(
+        [Pos2::new(c.x - 3.5, c.y), Pos2::new(c.x + 3.5, c.y + 4.0)],
+        st,
+    );
+}
+
+/// 警告三角（确认弹窗 info 态之外用）。
+pub fn warn(p: &egui::Painter, r: Rect, color: Color32) {
+    let c = r.center();
+    let st = stroke(color, 1.9);
+    poly(
+        p,
+        &[
+            Pos2::new(c.x, c.y - 6.0),
+            Pos2::new(c.x + 6.0, c.y + 5.0),
+            Pos2::new(c.x - 6.0, c.y + 5.0),
+            Pos2::new(c.x, c.y - 6.0),
+        ],
+        st,
+    );
+    p.line_segment([Pos2::new(c.x, c.y - 1.5), Pos2::new(c.x, c.y + 2.0)], st);
+    p.circle_filled(Pos2::new(c.x, c.y + 3.6), 0.9, color);
+}

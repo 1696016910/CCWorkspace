@@ -9,10 +9,11 @@ mod model;
 mod icons;
 mod markdown;
 mod service;
+mod settings;
 mod theme;
 
 use eframe::egui;
-use egui::Color32;
+use egui::{Color32, Stroke};
 use model::*;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -98,6 +99,33 @@ fn install_cjk_font(ctx: &egui::Context) {
     eprintln!("未找到中文字体，中文可能显示为方框");
 }
 
+/// 确认弹窗的语义：danger 不可恢复（红）、warn 可恢复（黄）、info 中性（绿）。
+#[derive(Clone, Copy, PartialEq)]
+pub enum Tone {
+    Danger,
+    Warn,
+    Info,
+}
+
+/// 确认后要执行的动作。
+#[derive(Clone)]
+pub enum ConfirmKind {
+    RemoveWorkspace(String),
+    DeleteSession(String),
+    PurgeSession(String),
+}
+
+/// 一次待确认的操作。
+#[derive(Clone)]
+pub struct Confirm {
+    pub title: String,
+    pub message: String,
+    pub warning: Option<String>,
+    pub confirm_text: String,
+    pub tone: Tone,
+    pub kind: ConfirmKind,
+}
+
 /// 会话右键菜单选中的动作。
 enum SessionAction {
     /// 打开「更多」菜单：(id, 名称, 是否置顶, 是否工作区)
@@ -135,7 +163,7 @@ struct App {
     show_new_ws: bool,
     new_ws_path: String,
     new_ws_name: String,
-    pending_delete: Option<(String, String, bool)>, // (id, 名称, 是工作区)
+    pending_confirm: Option<Confirm>,
     renaming: Option<(String, String, bool)>,       // (id, 当前名称, 是工作区)
 
     // 右键/更多菜单的目标
@@ -181,7 +209,7 @@ impl App {
             show_new_ws: false,
             new_ws_path: String::new(),
             new_ws_name: String::new(),
-            pending_delete: None,
+            pending_confirm: None,
             renaming: None,
             menu_target: None,
             dark: false,
@@ -213,6 +241,21 @@ impl App {
                     .map(|s| s.workspace_id.clone())
                     .or_else(|| app.workspaces.first().map(|w| w.id.clone()));
                 app.load_messages();
+                // 便于自动化验证：--settings 直接进入设置页
+                if std::env::args().any(|a| a == "--settings") {
+                    app.open_settings();
+                    // --tab env/perm/model/skills/plugins/market/update
+                    if let Some(t) = std::env::args()
+                        .position(|a| a == "--tab")
+                        .and_then(|i| std::env::args().nth(i + 1))
+                    {
+                        app.set_settings_tab(&t);
+                    }
+                }
+                if std::env::args().any(|a| a == "--trash") {
+                    app.open_trash();
+                    app.show_trash = true;
+                }
             }
             Err(e) => app.db_error = Some(e),
         }
@@ -484,51 +527,218 @@ impl App {
         self.trash_count = self.trash.len();
     }
 
+    /// 回收站，复刻 Node 版 TrashDialog.vue。
+    ///
+    /// 520px 宽、max-height 70vh、header 14px 16px、行 11px 16px、
+    /// 行内按钮 26px 高、彻底删除走 ConfirmDialog 二次确认。
     fn render_trash(&mut self, ctx: &egui::Context) {
         if !self.show_trash {
             return;
         }
-        let mut open = true;
-        let items = self.trash.clone();
-        let mut restore: Option<String> = None;
-        let mut purge: Option<(String, String)> = None;
+        let pal = self.pal();
+        let screen = ctx.screen_rect();
 
-        egui::Window::new("回收站")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_width(460.0)
-            .show(ctx, |ui| {
-                ui.label("删除的会话会先放在这里，可以随时恢复。彻底删除后无法找回。");
-                ui.separator();
-                if items.is_empty() {
-                    ui.label("回收站是空的");
+        // 遮罩
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("trash-mask"),
+        ));
+        painter.rect_filled(
+            screen,
+            egui::Rounding::ZERO,
+            Color32::from_rgba_unmultiplied(10, 10, 14, 115),
+        );
+
+        let items = self.trash.clone();
+        let w = 520.0_f32.min(screen.width() - 48.0);
+        let head_h = 48.0;
+        let row_h = 54.0;
+        let empty_h = 84.0;
+        let body_h = if items.is_empty() {
+            empty_h
+        } else {
+            (items.len() as f32 * row_h).min(screen.height() * 0.7 - head_h)
+        };
+        let total_h = head_h + body_h;
+        let rect = egui::Rect::from_center_size(screen.center(), egui::vec2(w, total_h));
+
+        painter.rect_filled(
+            rect.translate(egui::vec2(0.0, 20.0)),
+            egui::Rounding::same(10.0),
+            Color32::from_rgba_unmultiplied(0, 0, 0, 76),
+        );
+        painter.rect_filled(rect, egui::Rounding::same(10.0), pal.bg);
+        painter.rect_stroke(
+            rect,
+            egui::Rounding::same(10.0),
+            Stroke::new(1.0_f32, pal.line2),
+        );
+
+        // header：13.5px 标题 + 右侧 ✕
+        let head = egui::Rect::from_min_size(rect.min, egui::vec2(w, head_h));
+        painter.hline(head.x_range(), head.bottom(), Stroke::new(1.0_f32, pal.line));
+        painter.text(
+            egui::pos2(head.left() + 16.0, head.center().y),
+            egui::Align2::LEFT_CENTER,
+            "已删除的会话",
+            theme::font(13.5),
+            pal.t1,
+        );
+
+        let close_rect = egui::Rect::from_center_size(
+            egui::pos2(head.right() - 28.0, head.center().y),
+            egui::vec2(24.0, 24.0),
+        );
+        let close_hot = ctx
+            .input(|i| i.pointer.interact_pos())
+            .map(|p| close_rect.contains(p))
+            .unwrap_or(false);
+        if close_hot {
+            painter.rect_filled(close_rect, egui::Rounding::same(5.0), pal.bg_hover);
+        }
+        icons::close(
+            &painter,
+            egui::Rect::from_center_size(close_rect.center(), egui::vec2(12.0, 12.0)),
+            if close_hot { pal.t1 } else { pal.t3 },
+        );
+
+        // 列表
+        let mut restore: Option<String> = None;
+        let mut ask_purge: Option<(String, String)> = None;
+        let body = egui::Rect::from_min_size(
+            egui::pos2(rect.left(), head.bottom()),
+            egui::vec2(w, body_h),
+        );
+
+        if items.is_empty() {
+            painter.text(
+                body.center(),
+                egui::Align2::CENTER_CENTER,
+                "没有已删除的会话",
+                theme::font(12.5),
+                pal.t4,
+            );
+        }
+        let pointer = ctx.input(|i| i.pointer.interact_pos());
+        for (i, s) in items.iter().enumerate() {
+            let ry = body.top() + i as f32 * row_h;
+            if ry + row_h > body.bottom() {
+                break;
+            }
+            let row = egui::Rect::from_min_size(
+                egui::pos2(body.left(), ry),
+                egui::vec2(w, row_h),
+            );
+            if i + 1 < items.len() {
+                painter.hline(
+                    (row.left() + 16.0)..=(row.right() - 16.0),
+                    row.bottom(),
+                    Stroke::new(1.0_f32, pal.line),
+                );
+            }
+            let title = if s.title.is_empty() {
+                "(新会话)".to_string()
+            } else {
+                s.title.clone()
+            };
+            painter.text(
+                egui::pos2(row.left() + 16.0, row.center().y - 7.0),
+                egui::Align2::LEFT_CENTER,
+                &title,
+                theme::font(12.5),
+                pal.t1,
+            );
+            painter.text(
+                egui::pos2(row.left() + 16.0, row.center().y + 9.0),
+                egui::Align2::LEFT_CENTER,
+                format!("{} 条消息 · {}", s.message_count, local_datetime(&s.updated_at)),
+                theme::font(11.0),
+                pal.t4,
+            );
+
+            // 右侧两个按钮：恢复 / 彻底删除（26px 高）
+            let dy = row.center().y - 13.0;
+            let purge_w = 72.0;
+            let purge_rect = egui::Rect::from_min_size(
+                egui::pos2(row.right() - 16.0 - purge_w, dy),
+                egui::vec2(purge_w, 26.0),
+            );
+            let restore_w = 52.0;
+            let restore_rect = egui::Rect::from_min_size(
+                egui::pos2(purge_rect.left() - 8.0 - restore_w, dy),
+                egui::vec2(restore_w, 26.0),
+            );
+
+            let hot = |r: egui::Rect| pointer.map(|p| r.contains(p)).unwrap_or(false);
+
+            let rh = hot(restore_rect);
+            painter.rect_filled(
+                restore_rect,
+                egui::Rounding::same(6.0),
+                if rh { pal.bg_hover } else { pal.surface2 },
+            );
+            painter.rect_stroke(
+                restore_rect,
+                egui::Rounding::same(6.0),
+                Stroke::new(1.0_f32, pal.line3),
+            );
+            painter.text(
+                restore_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "恢复",
+                theme::font(12.0),
+                pal.t1,
+            );
+
+            let ph = hot(purge_rect);
+            painter.rect_filled(
+                purge_rect,
+                egui::Rounding::same(6.0),
+                if ph { pal.danger_bg } else { pal.surface2 },
+            );
+            painter.rect_stroke(
+                purge_rect,
+                egui::Rounding::same(6.0),
+                Stroke::new(1.0_f32, pal.danger_line),
+            );
+            painter.text(
+                purge_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "彻底删除",
+                theme::font(12.0),
+                if ph { pal.danger_t } else { pal.red },
+            );
+
+            if let Some(p) = ctx.input(|i| {
+                if i.pointer.any_click() {
+                    i.pointer.interact_pos()
+                } else {
+                    None
                 }
-                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
-                    for s in &items {
-                        let title = if s.title.is_empty() { "(新会话)".to_string() } else { s.title.clone() };
-                        ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                ui.strong(&title);
-                                ui.label(
-                                    egui::RichText::new(format!("{} · {} 条消息", s.updated_at, s.message_count))
-                                        .small()
-                                        .weak(),
-                                );
-                            });
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.button("彻底删除").clicked() {
-                                    purge = Some((s.id.clone(), title.clone()));
-                                }
-                                if ui.button("恢复").clicked() {
-                                    restore = Some(s.id.clone());
-                                }
-                            });
-                        });
-                        ui.separator();
-                    }
-                });
-            });
+            }) {
+                if restore_rect.contains(p) {
+                    restore = Some(s.id.clone());
+                } else if purge_rect.contains(p) {
+                    ask_purge = Some((s.id.clone(), title.clone()));
+                }
+            }
+        }
+
+        // 点击遮罩或 ✕ 关闭
+        if let Some(p) = ctx.input(|i| {
+            if i.pointer.any_click() {
+                i.pointer.interact_pos()
+            } else {
+                None
+            }
+        }) {
+            if close_rect.contains(p) || !rect.contains(p) {
+                self.show_trash = false;
+            }
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.show_trash = false;
+        }
 
         if let Some(id) = restore {
             if let Some(c) = &self.conn {
@@ -540,22 +750,17 @@ impl App {
                     Err(e) => self.status = e,
                 }
             }
-            self.open_trash();
+            self.refresh_trash();
         }
-        if let Some((id, name)) = purge {
-            if let Some(c) = &self.conn {
-                match service::purge_session(c, &id) {
-                    Ok(()) => {
-                        self.reload();
-                        self.status = format!("已彻底删除「{name}」");
-                    }
-                    Err(e) => self.status = e,
-                }
-            }
-            self.open_trash();
-        }
-        if !open {
-            self.show_trash = false;
+        if let Some((id, title)) = ask_purge {
+            self.pending_confirm = Some(Confirm {
+                title: "彻底删除？".into(),
+                message: format!("「{title}」及其全部消息将被永久删除，无法恢复。"),
+                warning: None,
+                confirm_text: "永久删除".into(),
+                tone: Tone::Danger,
+                kind: ConfirmKind::PurgeSession(id),
+            });
         }
     }
 
@@ -596,6 +801,256 @@ impl App {
             });
         if !open {
             self.preview = None;
+        }
+    }
+
+    /// 统一二次确认弹窗，复刻 Node 版 ConfirmDialog.vue。
+    ///
+    /// 420px 宽、14px 圆角、38px 圆形图标、footer 用 bg-bar 分隔。
+    /// 不用 egui::Window：它自带标题栏和关闭叉，和设计稿不一致。
+    pub fn render_confirm(&mut self, ctx: &egui::Context) {
+        let Some(c) = self.pending_confirm.clone() else { return };
+        let pal = self.pal();
+
+        // 遮罩：rgba(10,10,14,0.45)
+        let screen = ctx.screen_rect();
+        let mut dismissed = false;
+        let mut confirmed = false;
+
+        let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::new("confirm-layer"));
+        let painter = ctx.layer_painter(layer.clone());
+        painter.rect_filled(
+            screen,
+            egui::Rounding::ZERO,
+            Color32::from_rgba_unmultiplied(10, 10, 14, 115),
+        );
+
+        let w = 420.0_f32.min(screen.width() - 48.0);
+        let body_h = 96.0 + c.message.lines().count() as f32 * 4.0;
+        let extra_h = if c.warning.is_some() { 48.0 } else { 0.0 };
+        let foot_h = 62.0;
+        let total_h = body_h + extra_h + foot_h;
+        let rect = egui::Rect::from_center_size(screen.center(), egui::vec2(w, total_h));
+
+        // 卡片 + 阴影
+        painter.rect_filled(
+            rect.translate(egui::vec2(0.0, 12.0)),
+            egui::Rounding::same(14.0),
+            Color32::from_rgba_unmultiplied(0, 0, 0, 34),
+        );
+        painter.rect_filled(rect, egui::Rounding::same(14.0), pal.surface);
+
+        // 图标 38px，danger 红底 / warn 黄底 / info 绿底
+        let icon_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + 24.0, rect.top() + 22.0),
+            egui::vec2(38.0, 38.0),
+        );
+        let (ibg, icol) = match c.tone {
+            Tone::Danger => (pal.danger_bg, pal.red),
+            Tone::Warn => (pal.warn_bg, pal.warn_t),
+            Tone::Info => (pal.green_soft, pal.green),
+        };
+        painter.rect_filled(icon_rect, egui::Rounding::same(10.0), ibg);
+        let ic = egui::Rect::from_center_size(icon_rect.center(), egui::vec2(19.0, 19.0));
+        match c.tone {
+            Tone::Danger => icons::trash(&painter, ic, icol),
+            Tone::Warn => icons::warn(&painter, ic, icol),
+            Tone::Info => icons::gear(&painter, ic, icol),
+        }
+
+        // 标题 14px/600，正文 12.5px t2
+        let text_x = icon_rect.right() + 14.0;
+        let text_w = rect.right() - text_x - 24.0;
+        painter.text(
+            egui::pos2(text_x, icon_rect.top() + 2.0),
+            egui::Align2::LEFT_TOP,
+            &c.title,
+            theme::font_bold(14.0),
+            pal.t1,
+        );
+        let msg_galley = ctx.fonts(|f| {
+            f.layout(c.message.clone(), theme::font(12.5), pal.t2, text_w)
+        });
+        painter.galley(
+            egui::pos2(text_x, icon_rect.top() + 24.0),
+            msg_galley.clone(),
+            pal.t2,
+        );
+
+        // 警告块：danger-bg + danger-line
+        let y = (msg_galley.size().y + icon_rect.top() + 24.0).max(rect.top() + 88.0);
+        if let Some(warn) = &c.warning {
+            let wg = ctx.fonts(|f| f.layout(warn.clone(), theme::font(11.5), pal.danger_t, text_w - 22.0));
+            let wr = egui::Rect::from_min_size(
+                egui::pos2(text_x, y + 6.0),
+                egui::vec2(text_w, wg.size().y + 18.0),
+            );
+            painter.rect_filled(wr, egui::Rounding::same(7.0), pal.danger_bg);
+            painter.rect_stroke(
+                wr,
+                egui::Rounding::same(7.0),
+                Stroke::new(1.0_f32, pal.danger_line),
+            );
+            painter.galley(egui::pos2(wr.left() + 11.0, wr.top() + 9.0), wg, pal.danger_t);
+            let _ = wr.bottom();
+        }
+
+        // footer：bg-bar + 顶部 1px 分隔
+        let foot = egui::Rect::from_min_max(
+            egui::pos2(rect.left(), rect.bottom() - foot_h),
+            rect.right_bottom(),
+        );
+        painter.rect_filled(foot, egui::Rounding::ZERO, pal.bg_bar);
+        painter.hline(
+            foot.x_range(),
+            foot.top(),
+            Stroke::new(1.0_f32, pal.line),
+        );
+        // 只让 footer 的圆角贴合卡片底部
+        let foot_round = egui::Rect::from_min_max(
+            egui::pos2(rect.left(), rect.bottom() - 14.0),
+            rect.right_bottom(),
+        );
+        painter.rect_filled(foot_round, egui::Rounding { nw: 0.0, ne: 0.0, sw: 14.0, se: 14.0 }, pal.bg_bar);
+
+        // 按钮：取消（右起第二个）+ 确认
+        let bw_confirm = c.confirm_text.chars().count() as f32 * 13.0 + 36.0;
+        let bw_cancel = 68.0;
+        let by = foot.center().y - 17.0;
+        let confirm_rect = egui::Rect::from_min_size(
+            egui::pos2(foot.right() - 24.0 - bw_confirm, by),
+            egui::vec2(bw_confirm, 34.0),
+        );
+        let cancel_rect = egui::Rect::from_min_size(
+            egui::pos2(confirm_rect.left() - 10.0 - bw_cancel, by),
+            egui::vec2(bw_cancel, 34.0),
+        );
+
+        let cancel_resp = ctx
+            .input(|i| i.pointer.interact_pos())
+            .map(|p| cancel_rect.contains(p))
+            .unwrap_or(false);
+        let confirm_resp = ctx
+            .input(|i| i.pointer.interact_pos())
+            .map(|p| confirm_rect.contains(p))
+            .unwrap_or(false);
+
+        // 取消按钮：白底 + 1px 边框
+        painter.rect_filled(
+            cancel_rect,
+            egui::Rounding::same(8.0),
+            if cancel_resp { pal.bg_hover } else { pal.surface },
+        );
+        painter.rect_stroke(
+            cancel_rect,
+            egui::Rounding::same(8.0),
+            Stroke::new(1.0_f32, pal.line2),
+        );
+        painter.text(
+            cancel_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "取消",
+            theme::font(13.0),
+            pal.t1,
+        );
+
+        // 确认按钮：danger 红 / warn 绿
+        let cbg = match c.tone {
+            Tone::Danger => {
+                if confirm_resp {
+                    pal.danger_t
+                } else {
+                    pal.red
+                }
+            }
+            _ => {
+                if confirm_resp {
+                    pal.green_h
+                } else {
+                    pal.green
+                }
+            }
+        };
+        painter.rect_filled(confirm_rect, egui::Rounding::same(8.0), cbg);
+        painter.text(
+            confirm_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            &c.confirm_text,
+            theme::font_bold(13.0),
+            Color32::WHITE,
+        );
+
+        // 交互：点遮罩取消，Esc 取消，Enter 确认
+        let clicked = ctx.input(|i| {
+            if i.pointer.any_click() {
+                i.pointer.interact_pos()
+            } else {
+                None
+            }
+        });
+        if let Some(p) = clicked {
+            if confirm_rect.contains(p) {
+                confirmed = true;
+            } else if cancel_rect.contains(p) || !rect.contains(p) {
+                dismissed = true;
+            }
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            dismissed = true;
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+            confirmed = true;
+        }
+
+        if confirmed {
+            self.pending_confirm = None;
+            match &c.kind {
+                ConfirmKind::RemoveWorkspace(id) => {
+                    if let Some(conn) = &self.conn {
+                        match service::remove_workspace(conn, id) {
+                            Ok(()) => {
+                                if self.current_ws.as_deref() == Some(id.as_str()) {
+                                    self.current_ws = None;
+                                    self.current_ses = None;
+                                    self.messages.clear();
+                                }
+                                self.reload();
+                                self.status = "已删除工作区".into();
+                            }
+                            Err(e) => self.status = e,
+                        }
+                    }
+                }
+                ConfirmKind::DeleteSession(id) => {
+                    if let Some(conn) = &self.conn {
+                        match service::delete_session(conn, id) {
+                            Ok(()) => {
+                                if self.current_ses.as_deref() == Some(id.as_str()) {
+                                    self.current_ses = None;
+                                    self.messages.clear();
+                                }
+                                self.reload();
+                                self.status = "已移到回收站".into();
+                            }
+                            Err(e) => self.status = e,
+                        }
+                    }
+                }
+                ConfirmKind::PurgeSession(id) => {
+                    if let Some(conn) = &self.conn {
+                        match service::purge_session(conn, id) {
+                            Ok(()) => {
+                                self.reload();
+                                self.refresh_trash();
+                                self.status = "已彻底删除".into();
+                            }
+                            Err(e) => self.status = e,
+                        }
+                    }
+                }
+            }
+        } else if dismissed {
+            self.pending_confirm = None;
         }
     }
 
@@ -715,10 +1170,35 @@ impl App {
                     }
                 }
                 ("del", true) => {
-                    self.pending_delete = Some((id.clone(), name.clone(), true))
+                    // Node 版：删除工作区要提示回收站里会被一并永久删除的会话数
+                    let deleted = self.trash.iter().filter(|s| s.workspace_id == id).count();
+                    let warning = if deleted > 0 {
+                        Some(format!(
+                            "此外，回收站里还有 {deleted} 个属于该工作区的会话会被一并永久删除。"
+                        ))
+                    } else {
+                        None
+                    };
+                    self.pending_confirm = Some(Confirm {
+                        title: format!("删除工作区「{name}」？"),
+                        message: "该工作区及其全部会话都会被删除。磁盘上的项目目录不会被删除。"
+                            .into(),
+                        warning,
+                        confirm_text: "删除工作区".into(),
+                        tone: Tone::Danger,
+                        kind: ConfirmKind::RemoveWorkspace(id.clone()),
+                    });
                 }
                 ("del", false) => {
-                    self.pending_delete = Some((id.clone(), name.clone(), false))
+                    self.pending_confirm = Some(Confirm {
+                        title: format!("删除会话「{name}」？"),
+                        message: "会话将移到回收站，可以随时恢复。若该会话正在生成回复，会先停止。"
+                            .into(),
+                        warning: None,
+                        confirm_text: "移到回收站".into(),
+                        tone: Tone::Warn,
+                        kind: ConfirmKind::DeleteSession(id.clone()),
+                    });
                 }
                 _ => {}
             }
@@ -1360,7 +1840,15 @@ impl App {
                                     } else {
                                         s.title.clone()
                                     };
-                                    self.pending_delete = Some((s.id.clone(), t, false));
+                                    self.pending_confirm = Some(Confirm {
+                                        title: format!("删除会话「{t}」？"),
+                                        message: "会话将移到回收站，可以随时恢复。若该会话正在生成回复，会先停止。"
+                                            .into(),
+                                        warning: None,
+                                        confirm_text: "移到回收站".into(),
+                                        tone: Tone::Warn,
+                                        kind: ConfirmKind::DeleteSession(s.id.clone()),
+                                    });
                                 }
                                 None => self.status = "请先选择一个会话".into(),
                             },
@@ -1384,12 +1872,20 @@ impl App {
                         .show(ui, |ui| {
                             ui.add_space(26.0);
                             let msgs = self.messages.clone();
+                            let has_stream = msgs
+                                .iter()
+                                .any(|m| m.id == "__stream" && !m.text.is_empty());
+                            let t = ui.input(|i| i.time) as f32;
                             for m in &msgs {
                                 if m.role == "user" {
                                     draw_user_bubble(ui, &pal, m, left, inner_w);
                                 } else {
                                     draw_ai_message(ui, &pal, m, left, inner_w, &mut preview);
                                 }
+                            }
+                            // 正在生成且还没有任何增量时，显示呼吸圆点
+                            if self.streaming && !has_stream {
+                                draw_thinking(ui, &pal, left, inner_w, t);
                             }
                             ui.add_space(32.0);
                         });
@@ -1401,174 +1897,9 @@ impl App {
             });
     }
 
-    fn render_delete_dialog(&mut self, ctx: &egui::Context) {
-        let Some((id, name, is_ws)) = self.pending_delete.clone() else { return };
-        let mut open = true;
-        let (kind, hint) = if is_ws {
-            ("工作区", "将同时删除它下面的所有会话与消息，且无法恢复。磁盘目录不会被删除。")
-        } else {
-            ("会话", "会移到回收站，可以随时恢复。")
-        };
-        egui::Window::new(format!("删除{kind}"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.label(format!("确定删除「{name}」？"));
-                ui.label(egui::RichText::new(hint).small().weak());
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button("确定删除").clicked() {
-                        if let Some(conn) = &self.conn {
-                            let r = if is_ws {
-                                service::remove_workspace(conn, &id)
-                            } else {
-                                service::delete_session(conn, &id)
-                            };
-                            match r {
-                                Ok(()) => {
-                                    if is_ws && self.current_ws.as_deref() == Some(&id) {
-                                        self.current_ws = None;
-                                        self.current_ses = None;
-                                        self.messages.clear();
-                                    }
-                                    if !is_ws && self.current_ses.as_deref() == Some(&id) {
-                                        self.current_ses = None;
-                                        self.messages.clear();
-                                    }
-                                    self.reload();
-                                    self.status =
-                                        if is_ws { "已删除工作区".into() } else { "已移到回收站".into() };
-                                }
-                                Err(e) => self.status = e,
-                            }
-                        }
-                        self.pending_delete = None;
-                    }
-                    if ui.button("取消").clicked() {
-                        self.pending_delete = None;
-                    }
-                });
-            });
-        if !open {
-            self.pending_delete = None;
-        }
-    }
 
     /// 设置页：左侧 8 个分区导航 + 右侧内容。
-    fn render_settings(&mut self, ctx: &egui::Context) {
-        const TABS: &[&str] = &[
-            "工作区", "环境变量", "权限", "模型", "Skill", "插件", "插件仓库", "更新",
-        ];
 
-        egui::TopBottomPanel::top("settings_head").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("← 返回").clicked() {
-                    self.show_settings = false;
-                }
-                ui.heading("设置");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(&self.status).small().weak());
-                });
-            });
-        });
-
-        egui::SidePanel::left("settings_nav")
-            .resizable(false)
-            .default_width(160.0)
-            .show(ctx, |ui| {
-                ui.add_space(4.0);
-                for (i, t) in TABS.iter().enumerate() {
-                    if ui.selectable_label(self.settings_tab == i, *t).clicked() {
-                        self.settings_tab = i;
-                        self.load_settings();
-                    }
-                }
-            });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| match self.settings_tab {
-                    0 => self.settings_workspaces(ui),
-                    1 => self.settings_env(ui),
-                    2 => self.settings_permissions(ui),
-                    3 => self.settings_models(ui),
-                    4 => self.settings_skills(ui),
-                    5 => self.settings_plugins(ui),
-                    6 => self.settings_marketplaces(ui),
-                    _ => self.settings_update(ui),
-                });
-        });
-
-        self.render_row_menu(ctx);
-        self.render_delete_dialog(ctx);
-        self.render_rename_dialog(ctx);
-        self.render_trash(ctx);
-        self.render_preview(ctx);
-    }
-
-    fn settings_workspaces(&mut self, ui: &mut egui::Ui) {
-        ui.heading("工作区");
-        ui.label("工作区是一个项目目录，每个工作区下可以建多个会话。");
-        ui.separator();
-
-        let list = self.workspaces.clone();
-        if list.is_empty() {
-            ui.label("还没有工作区");
-        }
-        for w in &list {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.strong(&w.name);
-                    ui.label(egui::RichText::new(&w.path).small().weak());
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("移除").clicked() {
-                        self.pending_delete = Some((w.id.clone(), w.name.clone(), true));
-                    }
-                    if ui.button("重命名").clicked() {
-                        self.renaming = Some((w.id.clone(), w.name.clone(), true));
-                    }
-                    let pin_label = if w.pinned_at.is_some() { "取消置顶" } else { "置顶" };
-                    if ui.button(pin_label).clicked() {
-                        if let Some(conn) = &self.conn {
-                            let _ = service::pin_workspace(conn, &w.id, w.pinned_at.is_none());
-                            self.reload();
-                        }
-                    }
-                });
-            });
-            ui.separator();
-        }
-
-        ui.add_space(8.0);
-        ui.label("添加工作区");
-        ui.add(
-            egui::TextEdit::singleline(&mut self.new_ws_path)
-                .hint_text("项目目录绝对路径")
-                .desired_width(360.0),
-        );
-        ui.add(
-            egui::TextEdit::singleline(&mut self.new_ws_name)
-                .hint_text("名称（留空用目录名）")
-                .desired_width(360.0),
-        );
-        let can = !self.new_ws_path.trim().is_empty();
-        if ui.add_enabled(can, egui::Button::new("添加")).clicked() {
-            if let Some(conn) = &self.conn {
-                match service::add_workspace(conn, &self.new_ws_path, &self.new_ws_name) {
-                    Ok(()) => {
-                        self.new_ws_path.clear();
-                        self.new_ws_name.clear();
-                        self.reload();
-                        self.status = "工作区已添加".into();
-                    }
-                    Err(e) => self.status = e,
-                }
-            }
-        }
-    }
 
     fn render_rename_dialog(&mut self, ctx: &egui::Context) {
         let Some((id, name, is_ws)) = self.renaming.clone() else { return };
@@ -1610,235 +1941,27 @@ impl App {
         }
     }
 
-    fn settings_env(&mut self, ui: &mut egui::Ui) {
-        ui.heading("环境变量");
-        ui.label("写入 ~/.claude/settings.json 的 env 字段，保存前会自动备份。");
-        ui.separator();
 
-        let mut remove_at: Option<usize> = None;
-        for (i, (k, v)) in self.env_rows.iter_mut().enumerate() {
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(k).hint_text("名称").desired_width(220.0));
-                ui.add(egui::TextEdit::singleline(v).hint_text("值").desired_width(320.0));
-                if ui.button("删除").clicked() {
-                    remove_at = Some(i);
-                }
-            });
-        }
-        if let Some(i) = remove_at {
-            self.env_rows.remove(i);
-        }
 
-        ui.add_space(6.0);
-        if ui.button("＋ 添加一行").clicked() {
-            self.env_rows.push((String::new(), String::new()));
-        }
-        ui.add_space(6.0);
-        ui.label(egui::RichText::new("这些值以明文保存在本地配置文件中，不会上传。").small().weak());
-        ui.add_space(6.0);
-        if ui.button("保存").clicked() {
-            let list: Vec<EnvEntry> = self
-                .env_rows
-                .iter()
-                .filter(|(k, _)| !k.trim().is_empty())
-                .map(|(k, v)| EnvEntry { key: k.trim().to_string(), value: v.clone() })
-                .collect();
-            if let Some(problem) = service::validate_env(&list) {
-                self.status = problem;
-            } else {
-                match service::save_env(&list) {
-                    Ok(()) => self.status = "已保存".into(),
-                    Err(e) => self.status = e,
-                }
-            }
-        }
-    }
 
-    fn settings_permissions(&mut self, ui: &mut egui::Ui) {
-        ui.heading("权限");
-        ui.label("控制 Claude 执行工具时的确认行为。");
-        ui.separator();
 
-        let modes = ["default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"];
-        egui::ComboBox::from_label("默认模式")
-            .selected_text(&self.perm_mode)
-            .show_ui(ui, |ui| {
-                for m in modes {
-                    ui.selectable_value(&mut self.perm_mode, m.to_string(), m);
-                }
-            });
 
-        ui.label("允许规则（每行一条）");
-        ui.add(
-            egui::TextEdit::multiline(&mut self.perm_allow)
-                .desired_rows(4)
-                .desired_width(f32::INFINITY),
-        );
-        ui.label("拒绝规则（每行一条）");
-        ui.add(
-            egui::TextEdit::multiline(&mut self.perm_deny)
-                .desired_rows(4)
-                .desired_width(f32::INFINITY),
-        );
 
-        ui.add_space(8.0);
-        if ui.button("保存").clicked() {
-            let p = service::Permissions {
-                default_mode: self.perm_mode.clone(),
-                allow: split_lines(&self.perm_allow),
-                deny: split_lines(&self.perm_deny),
-            };
-            match service::save_permissions(&p) {
-                Ok(()) => self.status = "已保存".into(),
-                Err(e) => self.status = e,
-            }
-        }
-    }
-
-    fn settings_models(&mut self, ui: &mut egui::Ui) {
-        ui.heading("模型");
-        ui.label("模型只能在这里修改，会话内不提供切换。这些值存放在 settings.json 的 env 中。");
-        ui.separator();
-
-        for (key, label, value) in self.model_fields.iter_mut() {
-            ui.horizontal(|ui| {
-                ui.add_sized([120.0, 20.0], egui::Label::new(label.as_str()));
-                ui.add(egui::TextEdit::singleline(value).desired_width(280.0));
-                ui.label(egui::RichText::new(key.as_str()).small().weak());
-            });
-        }
-
-        ui.add_space(8.0);
-        if ui.button("保存").clicked() {
-            let list: Vec<(String, String)> = self
-                .model_fields
-                .iter()
-                .map(|(k, _, v)| (k.clone(), v.clone()))
-                .collect();
-            match service::save_models(&list) {
-                Ok(()) => self.status = "已保存".into(),
-                Err(e) => self.status = e,
-            }
-        }
-    }
-
-    fn settings_skills(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Skill");
-        ui.label("扫描 ~/.claude/skills。开关只影响新会话。");
-        ui.separator();
-
-        let skills = match &self.conn {
-            Some(c) => service::list_skills(c),
-            None => vec![],
-        };
-        if skills.is_empty() {
-            ui.label("未找到任何 Skill");
-        }
-        for s in skills {
-            let mut on = s.enabled;
-            if ui.checkbox(&mut on, &s.name).changed() {
-                let r = match &self.conn {
-                    Some(c) => service::toggle_skill(c, &s.name, on),
-                    None => Err("数据库未打开".into()),
-                };
-                match r {
-                    Ok(()) => self.status = "已更新".into(),
-                    Err(e) => self.status = e,
-                }
-            }
-            if !s.description.is_empty() {
-                ui.label(egui::RichText::new(&s.description).small().weak());
-            }
-        }
-    }
-
-    fn settings_plugins(&mut self, ui: &mut egui::Ui) {
-        ui.heading("插件");
-        ui.label("已安装的插件。启用或禁用会影响下一次会话。");
-        ui.separator();
-
-        let plugins = service::list_plugins();
-        if plugins.is_empty() {
-            ui.label("没有已安装的插件，或 claude 命令不可用");
-        }
-        for p in plugins {
-            let mut on = p.enabled;
-            if ui.checkbox(&mut on, format!("{}  {}", p.name, p.version)).changed() {
-                match service::toggle_plugin(&p.id, on) {
-                    Ok(()) => self.status = "已更新".into(),
-                    Err(e) => self.status = e,
-                }
-            }
-        }
-    }
-
-    fn settings_marketplaces(&mut self, ui: &mut egui::Ui) {
-        ui.heading("插件仓库");
-        ui.label("添加第三方插件来源。");
-        ui.separator();
-
-        let mut remove: Option<String> = None;
-        for m in service::list_marketplaces() {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.strong(&m.name);
-                    ui.label(egui::RichText::new(&m.source).small().weak());
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if m.builtin {
-                        ui.label(egui::RichText::new("内置").small().weak());
-                    } else if ui.button("移除").clicked() {
-                        remove = Some(m.name.clone());
-                    }
-                });
-            });
-            ui.separator();
-        }
-        if let Some(name) = remove {
-            match service::remove_marketplace(&name) {
-                Ok(()) => self.status = "已移除仓库".into(),
-                Err(e) => self.status = e,
-            }
-        }
-
-        ui.add_space(8.0);
-        ui.add(egui::TextEdit::singleline(&mut self.mkt_name).hint_text("仓库名称").desired_width(220.0));
-        ui.add(
-            egui::TextEdit::singleline(&mut self.mkt_repo)
-                .hint_text("github.com/owner/repo")
-                .desired_width(320.0),
-        );
-        if ui.button("添加仓库").clicked() {
-            match service::add_marketplace(&self.mkt_name, &self.mkt_repo) {
-                Ok(()) => {
-                    self.mkt_name.clear();
-                    self.mkt_repo.clear();
-                    self.status = "已添加仓库".into();
-                }
-                Err(e) => self.status = e,
-            }
-        }
-    }
-
-    fn settings_update(&mut self, ui: &mut egui::Ui) {
-        ui.heading("更新");
-        ui.label("Rust 版是单文件程序，更新方式是下载新版本替换。");
-        ui.separator();
-        ui.label(format!("当前版本：v{VERSION}"));
-        ui.label("发布地址：https://github.com/1696016910/CCWorkspace/releases");
-        ui.add_space(8.0);
-        ui.label("三个实现各有独立产物：");
-        ui.label("  ClaudeWorkbench-Node-<版本>-x64.exe");
-        ui.label("  ClaudeWorkbench-Go-<版本>-x64.exe");
-        ui.label("  ClaudeWorkbench-Rust-<版本>-x64.exe");
-    }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll();
+        // 快捷键：Ctrl+, 打开设置（和多数桌面应用一致）
+        if !self.show_settings && ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Comma)) {
+            self.open_settings();
+        }
+        if self.show_settings && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.show_settings = false;
+        }
         if self.streaming {
-            ctx.request_repaint_after(std::time::Duration::from_millis(120));
+            // 呼吸圆点要连续重绘，否则会停在第一帧
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
 
         if self.show_settings {
@@ -1867,7 +1990,6 @@ impl eframe::App for App {
 
         self.render_row_menu(ctx);
         self.render_context_panel(ctx);
-        self.render_delete_dialog(ctx);
         self.render_trash(ctx);
         self.render_preview(ctx);
 
@@ -1946,6 +2068,35 @@ impl FootIcon {
     }
 }
 
+/// ISO 时间 → 「2026-10-27 08:34」本地时间，回收站按 Node 版显示完整时间。
+fn local_datetime(iso: &str) -> String {
+    let Ok(secs) = parse_iso(iso) else { return iso.to_string() };
+    // 加 8 小时就近近似本地时区（东八区）
+    let t = secs + 8 * 3600;
+    let days = t.div_euclid(86400);
+    let rem = t.rem_euclid(86400);
+    let (y, m, d) = civil_from_days(days);
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}",
+        rem / 3600,
+        (rem % 3600) / 60
+    )
+}
+
+/// Howard Hinnant 的 civil_from_days，把 unix 天数转回年月日。
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
 /// 把 ISO 时间转成设计稿里的相对时间：“5分钟前”“2小时前”“昨天”。
 ///
 /// 解析失败时返回空串，不把原始 ISO 串怼到界面上。
@@ -1989,6 +2140,41 @@ fn parse_iso(s: &str) -> Result<i64, ()> {
     let days = era * 146097 + doe - 719468;
 
     Ok(days * 86400 + h * 3600 + mi * 60 + sec)
+}
+
+/// 等待动画：三个 5px 圆点依次呼吸，1.4s 一周期。
+///
+/// 对齐 Node 版 .thinking .dot 的 breathe 关键帧：
+/// 0%/100% opacity .25 scale .85，50% opacity 1 scale 1。
+fn draw_thinking(ui: &mut egui::Ui, pal: &theme::Pal, left: f32, inner_w: f32, t: f32) {
+    let top = ui.cursor().top();
+    let base_x = left + 38.0;
+    for i in 0..3 {
+        // 每个点延迟 0.18s
+        let phase = ((t - i as f32 * 0.18) % 1.4) / 1.4;
+        // 0..0.5 上升到全亮，0.5..1 回落
+        let k = if phase < 0.5 { phase * 2.0 } else { (1.0 - phase) * 2.0 };
+        let opacity = 0.25 + 0.75 * k;
+        let scale = 0.85 + 0.15 * k;
+        let c = pal.green.gamma_multiply(opacity);
+        ui.painter().circle_filled(
+            egui::pos2(base_x + i as f32 * 8.0, top + 10.0),
+            2.5 * scale,
+            c,
+        );
+    }
+    ui.painter().text(
+        egui::pos2(base_x + 32.0, top + 10.0),
+        egui::Align2::LEFT_CENTER,
+        "正在思考…",
+        theme::font(12.0),
+        pal.t4,
+    );
+    ui.allocate_rect(
+        egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(inner_w, 28.0)),
+        egui::Sense::hover(),
+    );
+    ui.add_space(26.0);
 }
 
 /// 用户气泡：.msg-user .bubble radius:14px 14px 4px 14px bg-soft max-width:78%
