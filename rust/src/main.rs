@@ -78,10 +78,6 @@ fn install_cjk_font(ctx: &egui::Context) {
 enum SessionAction {
     /// 打开「更多」菜单：(id, 名称, 是否置顶, 是否工作区)
     Menu(String, String, bool, bool),
-    Rename(String, String),
-    Pin(String, bool),
-    Duplicate(String),
-    Delete(String, String),
 }
 
 /// 后台线程回传的消息。
@@ -599,13 +595,18 @@ impl App {
                     .inner_margin(egui::Margin::same(5.0)),
             )
             .show(ctx, |ui| {
-                let item = |ui: &mut egui::Ui, label: &str, danger: bool| -> bool {
+                let item = |ui: &mut egui::Ui, label: &str, danger: bool, icon: Option<FootIcon>| -> bool {
                     let h = 30.0;
                     let (rect, resp) =
                         ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::click());
                     if resp.hovered() {
                         let bg = if danger { pal.danger_bg } else { pal.bg_hover };
-                        theme::round_rect(ui, rect, 6, bg, None);
+                        let stroke = if danger {
+                            Some(egui::Stroke::new(1.0_f32, pal.danger_line))
+                        } else {
+                            None
+                        };
+                        theme::round_rect(ui, rect, 6, bg, stroke);
                     }
                     let col = if danger {
                         pal.danger_t
@@ -614,8 +615,15 @@ impl App {
                     } else {
                         pal.t2
                     };
+                    if let Some(ic) = icon {
+                        let ir = egui::Rect::from_center_size(
+                            egui::pos2(rect.left() + 18.0, rect.center().y),
+                            egui::vec2(14.0, 14.0),
+                        );
+                        ic.draw(ui.painter(), ir, col);
+                    }
                     ui.painter().text(
-                        egui::pos2(rect.left() + 10.0, rect.center().y),
+                        egui::pos2(rect.left() + if icon.is_some() { 28.0 } else { 10.0 }, rect.center().y),
                         egui::Align2::LEFT_CENTER,
                         label,
                         theme::font(12.5),
@@ -624,14 +632,14 @@ impl App {
                     resp.clicked()
                 };
 
-                if item(ui, "重命名", false) {
+                if item(ui, "重命名", false, None) {
                     picked = Some("rename");
                 }
                 let pin_label = if pinned { "取消置顶" } else { "置顶" };
-                if item(ui, pin_label, false) {
+                if item(ui, pin_label, false, Some(FootIcon::Pin)) {
                     picked = Some("pin");
                 }
-                if !is_ws && item(ui, "复制会话", false) {
+                if !is_ws && item(ui, "复制会话", false, Some(FootIcon::Copy)) {
                     picked = Some("dup");
                 }
                 if !is_ws {
@@ -644,7 +652,7 @@ impl App {
                         .hline(r.0.x_range(), r.0.center().y, egui::Stroke::new(1.0_f32, pal.line));
                     ui.add_space(4.0);
                 }
-                if item(ui, if is_ws { "移除工作区" } else { "删除会话" }, true) {
+                if item(ui, if is_ws { "移除工作区" } else { "删除会话" }, true, Some(FootIcon::Trash)) {
                     picked = Some("del");
                 }
             });
@@ -1130,13 +1138,7 @@ impl App {
                     egui::pos2(left + 10.0, bar_y + 7.0),
                     egui::vec2(28.0, 28.0),
                 );
-                ui.painter().text(
-                    plus_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "＋",
-                    theme::font(16.0),
-                    pal.t3,
-                );
+                icons::plus(ui.painter(), plus_rect, pal.t3);
 
                 let send_rect = egui::Rect::from_min_size(
                     egui::pos2(left + box_w - 40.0, bar_y + 6.0),
@@ -1156,13 +1158,12 @@ impl App {
                     pal.green.gamma_multiply(0.4)
                 };
                 theme::round_rect(ui, send_rect, 8, send_fill, None);
-                ui.painter().text(
-                    send_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    if self.streaming { "■" } else { "↑" },
-                    theme::font(15.0),
-                    Color32::WHITE,
-                );
+                let send_ic = egui::Rect::from_center_size(send_rect.center(), egui::vec2(15.0, 15.0));
+                if self.streaming {
+                    icons::stop(ui.painter(), send_ic, Color32::WHITE);
+                } else {
+                    icons::arrow_up(ui.painter(), send_ic, Color32::WHITE);
+                }
                 let send_resp = ui.interact(send_rect, ui.id().with("send"), egui::Sense::click());
                 if send_resp.clicked() {
                     if self.streaming {
@@ -1903,6 +1904,9 @@ enum FootIcon {
     Moon,
     Recycle,
     Gear,
+    Pin,
+    Copy,
+    Trash,
 }
 
 impl FootIcon {
@@ -1911,6 +1915,9 @@ impl FootIcon {
             FootIcon::Moon => icons::moon(p, r, c),
             FootIcon::Recycle => icons::recycle(p, r, c),
             FootIcon::Gear => icons::gear(p, r, c),
+            FootIcon::Pin => icons::pin(p, r, c),
+            FootIcon::Copy => icons::copy(p, r, c),
+            FootIcon::Trash => icons::trash(p, r, c),
         }
     }
 }
