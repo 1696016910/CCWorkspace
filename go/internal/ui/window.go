@@ -50,6 +50,15 @@ type MainWindow struct {
 	// 主界面根容器，设置页打开时暂存以便返回
 	root fyne.CanvasObject
 
+	// 侧栏树容器（工作区/会话分组）
+	wsBody *fyne.Container
+	// 输入区上下文百分比按钮
+	ctxBtn *widget.Button
+	// 当前主题字体资源，切明暗时复用
+	font fyne.Resource
+	// 是否暗色
+	dark bool
+
 	// 待确认的删除："session" 或 "workspace"
 	pendingKind string
 	pendingID   string
@@ -59,11 +68,13 @@ type MainWindow struct {
 // NewMainWindow 构建主窗口。
 func NewMainWindow(api API, chat ChatFn) *MainWindow {
 	a := app.NewWithID("com.jianzhou.claude-workbench.go")
+	var loadedFont fyne.Resource
 
 	// 加载系统中文字体：Fyne 内置字体没有中文，不加载会显示方框
 	if p := findChineseFont(); p != "" {
 		if res, err := loadFontResource(p); err == nil {
-			a.Settings().SetTheme(&cjkTheme{base: theme.DefaultTheme(), font: res})
+			loadedFont = res
+			a.Settings().SetTheme(&appTheme{base: theme.DefaultTheme(), font: res})
 		} else {
 			log.Printf("加载中文字体失败: %v", err)
 		}
@@ -74,7 +85,7 @@ func NewMainWindow(api API, chat ChatFn) *MainWindow {
 	w := a.NewWindow("Claude 工作台")
 	w.Resize(fyne.NewSize(1200, 800))
 
-	m := &MainWindow{fyneApp: a, win: w, api: api, chat: chat}
+	m := &MainWindow{fyneApp: a, win: w, api: api, chat: chat, font: loadedFont}
 	m.build()
 	return m
 }
@@ -87,174 +98,31 @@ func (m *MainWindow) build() {
 	m.sessions = m.api.LoadSessions()
 	m.refreshNames()
 
-	// ── 左侧栏 ──
-	wsList := widget.NewList(
-		func() int { return len(m.wsNames) },
-		func() fyne.CanvasObject {
-			return widget.NewLabel("")
-		},
-		func(i widget.ListItemID, o fyne.CanvasObject) {
-			o.(*widget.Label).SetText(m.wsNames[i])
-		},
-	)
-	wsList.OnSelected = func(i widget.ListItemID) {
-		if i < 0 || i >= len(m.workspaces) {
-			return
-		}
-		m.currentWS = m.workspaces[i].ID
-		m.refreshSessions()
-	}
-	m.wsList = wsList
+	// ── 左侧栏 + 主区（设计稿布局，见 layout.go）──
+	sidebarBox := container.NewGridWrap(fyne.NewSize(sizeSidebarW, 700), m.sidebar())
+	main := container.NewBorder(m.mainHead(), m.composer(), nil, nil, m.threadBox())
 
-	sessList := widget.NewList(
-		func() int { return len(m.sessTitles) },
-		func() fyne.CanvasObject { return widget.NewLabel("") },
-		func(i widget.ListItemID, o fyne.CanvasObject) {
-			o.(*widget.Label).SetText(m.sessTitles[i])
-		},
-	)
-	sessList.OnSelected = func(i widget.ListItemID) {
-		if i < 0 || i >= len(m.sessions) {
-			return
-		}
-		m.currentSes = m.sessions[i].ID
-		m.loadChat()
-	}
-	m.sessList = sessList
-
-	newWsBtn := widget.NewButtonWithIcon("新建工作区", theme.ContentAddIcon(), m.promptNewWorkspace)
-	newSessBtn := widget.NewButtonWithIcon("新建会话", theme.ContentAddIcon(), m.newSession)
-
-	// 删除入口：选中项后点删除，先弹确认
-	delWsBtn := widget.NewButton("删除工作区", func() {
-		if m.currentWS == "" {
-			m.setStatus("请先选择一个工作区")
-			return
-		}
-		for _, w := range m.workspaces {
-			if w.ID == m.currentWS {
-				m.askDelete("workspace", w.ID, w.Name)
-				return
-			}
-		}
-	})
-	delSesBtn := widget.NewButton("删除会话", func() {
-		if m.currentSes == "" {
-			m.setStatus("请先选择一个会话")
-			return
-		}
-		for _, s := range m.sessions {
-			if s.ID == m.currentSes {
-				title := s.Title
-				if title == "" {
-					title = "(新会话)"
-				}
-				m.askDelete("session", s.ID, title)
-				return
-			}
-		}
-	})
-
-	// 四个会话操作收进一个「更多」菜单：纵向堆叠会挤掉会话列表的可见行数。
-	var moreSesBtn *widget.Button
-	moreSesBtn = widget.NewButtonWithIcon("更多", theme.MoreHorizontalIcon(), func() {
-		s := m.findSession(m.currentSes)
-		if s == nil {
-			m.setStatus("请先选择一个会话")
-			return
-		}
-		pinLabel := "置顶"
-		if s.PinnedAt != nil {
-			pinLabel = "取消置顶"
-		}
-		menu := fyne.NewMenu("",
-			fyne.NewMenuItem("重命名", func() { m.promptRenameSession(s.ID, s.Title) }),
-			fyne.NewMenuItem(pinLabel, func() {
-				if err := m.api.PinSession(s.ID, s.PinnedAt == nil); err != nil {
-					m.setStatus(err.Error())
-					return
-				}
-				m.refreshSessions()
-				m.setStatus("已更新置顶")
-			}),
-			fyne.NewMenuItem("复制会话", func() {
-				if _, err := m.api.DuplicateSession(s.ID); err != nil {
-					m.setStatus(err.Error())
-					return
-				}
-				m.refreshSessions()
-				m.setStatus("已复制会话")
-			}),
-			fyne.NewMenuItemSeparator(),
-			fyne.NewMenuItem("删除会话", func() {
-				title := s.Title
-				if title == "" {
-					title = "(新会话)"
-				}
-				m.askDelete("session", s.ID, title)
-			}),
-		)
-		widget.ShowPopUpMenuAtPosition(menu, m.win.Canvas(), fyne.CurrentApp().Driver().AbsolutePositionForObject(moreSesBtn))
-	})
-
-	wsPane := container.NewBorder(
-		container.NewVBox(newWsBtn, delWsBtn, widget.NewLabel("工作区")),
-		nil, nil, nil, wsList)
-	sessPane := container.NewBorder(
-		container.NewVBox(container.NewBorder(nil, nil, nil,
-			container.NewHBox(moreSesBtn, delSesBtn), newSessBtn), widget.NewLabel("会话")),
-		nil, nil, nil, sessList)
-
-	// 上下两半，各自带滚动；固定最小宽度避免被右侧对话区挤压
-	sidebar := container.NewVSplit(wsPane, sessPane)
-	sidebar.SetOffset(0.34)
-	sidebarBox := container.NewGridWrap(fyne.NewSize(250, 700), sidebar)
-
-	// ── 对话区 ──
-	m.chatBox = container.NewVBox()
-	m.chatScroll = container.NewVScroll(m.chatBox)
-	m.chatScroll.SetMinSize(fyne.NewSize(600, 500))
-
-	// ── 输入区 ──
-	m.input = widget.NewMultiLineEntry()
-	m.input.SetPlaceHolder("描述你想让它做的事")
-	m.input.Wrapping = fyne.TextWrapWord
-
-	m.sendBtn = widget.NewButtonWithIcon("发送", theme.MailSendIcon(), m.send)
-	m.stopBtn = widget.NewButtonWithIcon("停止", theme.MediaStopIcon(), m.stop)
-	m.stopBtn.Disable()
-
-	m.statusLabel = widget.NewLabel("就绪")
-
-	contextBtn := widget.NewButtonWithIcon("上下文", theme.InfoIcon(), m.showContext)
-	trashBtn := widget.NewButtonWithIcon("回收站", theme.DeleteIcon(), m.ShowTrash)
-
-	composer := container.NewBorder(
-		nil,
-		container.NewHBox(m.sendBtn, m.stopBtn, contextBtn, trashBtn, m.statusLabel),
-		nil, nil,
-		m.input,
-	)
-
-	head := widget.NewLabel("Claude 工作台 · Go 版")
-	head.TextStyle = fyne.TextStyle{Bold: true}
-	settingsBtn := widget.NewButtonWithIcon("设置", theme.SettingsIcon(), func() {
-		m.ShowSettings()
-	})
-
-	right := container.NewBorder(
-		container.NewBorder(nil, nil, nil, settingsBtn, head), composer, nil, nil,
-		m.chatScroll,
-	)
-
-	split := container.NewHSplit(sidebarBox, right)
-	split.SetOffset(0.22)
+	split := container.NewHSplit(sidebarBox, main)
+	split.SetOffset(0.0)
 
 	m.root = split
 	m.win.SetContent(split)
 
+	// 默认选中第一个工作区里的最近一个会话，主区不至于空白
+	if len(m.workspaces) > 0 {
+		m.currentWS = m.workspaces[0].ID
+		m.sessions = m.api.LoadSessions()
+		for _, s := range m.sessions {
+			if s.WorkspaceID == m.currentWS {
+				m.currentSes = s.ID
+				break
+			}
+		}
+		m.loadChat()
+		m.rebuildTree()
+		m.win.SetContent(split)
+	}
 	m.refreshSessions()
-	m.appendSystem("已就绪。数据库：" + m.api.Summary())
 }
 
 // mainContent 返回主界面，供从设置页返回时恢复。
@@ -312,29 +180,84 @@ func (m *MainWindow) loadChat() {
 }
 
 func (m *MainWindow) appendMessage(msg model.ChatMessage) {
-	text := widget.NewLabel(msg.Text)
-	text.Wrapping = fyne.TextWrapWord
-
 	if msg.Role == "user" {
-		text.TextStyle = fyne.TextStyle{Bold: true}
+		m.chatBox.Add(newUserBubble(msg.Text))
+		if msg.Stopped {
+			m.chatBox.Add(m.stoppedPill())
+		}
+		m.chatBox.Add(vgap(18))
+		m.chatBox.Refresh()
+		return
 	}
-	m.chatBox.Add(text)
 
-	if msg.Stopped {
-		hint := widget.NewLabel("■ 已停止生成")
-		hint.TextStyle = fyne.TextStyle{Italic: true}
-		m.chatBox.Add(hint)
-	}
+	// 头像 26px + 正文
+	av := canvas.NewText("C", colGreen)
+	av.TextSize = 12
+	av.Alignment = fyne.TextAlignCenter
+	avCard := container.NewGridWrap(fyne.NewSize(26, 26),
+		container.NewMax(canvas.NewRectangle(colGreenS), container.NewCenter(av)))
 
+	role := text("Claude", fsRole, colT4)
+	body := widget.NewLabel(msg.Text)
+	body.Wrapping = fyne.TextWrapWord
+	body.Alignment = fyne.TextAlignLeading
+
+	right := container.NewVBox(role, body)
 	if len(msg.Tools) > 0 {
-		m.chatBox.Add(widget.NewLabel(m.toolSummary(msg.Tools)))
+		right.Add(vgap(4))
+		right.Add(text(m.toolSummary(msg.Tools), 11.5, colT3))
 		for _, t := range msg.Tools {
 			if looksLikePath(t.Target) {
-				m.chatBox.Add(m.fileChip(t.Target))
+				right.Add(m.fileChip(t.Target))
 			}
 		}
 	}
+	if msg.Stopped {
+		right.Add(vgap(6))
+		right.Add(m.stoppedPill())
+	}
+
+	row := container.NewBorder(nil, nil, avCard, nil, right)
+	m.chatBox.Add(row)
+	m.chatBox.Add(vgap(18))
 	m.chatBox.Refresh()
+}
+
+// newUserBubble .msg-user：右对齐、bg-soft、14px 圆角、max-width 78%
+//
+// Fyne 没有 flex，VScroll 里也拿不到真实可用宽度，
+// 因此用 VBox + HBox 的空占位把气泡顶到右侧（宽度由标签内容决定）。
+func newUserBubble(s string) fyne.CanvasObject {
+	l := widget.NewLabel(s)
+	l.Wrapping = fyne.TextWrapWord
+	bubble := container.NewMax(canvas.NewRectangle(colSoft), container.NewPadded(l))
+	// VScroll 会按 MinSize 撑开画布，Resize 无效；
+	// 用固定宽度的透明左占位 + 气泡，让整行宽度确定、气泡靠右
+	const rowW, bubbleW = 720.0, 480.0
+	spacer := canvas.NewRectangle(colTrans)
+	spacer.SetMinSize(fyne.NewSize(rowW-bubbleW, 1))
+	return container.NewHBox(spacer, container.NewGridWrap(fyne.NewSize(bubbleW, bubble.MinSize().Height), bubble))
+}
+
+// vgap 纯占位，做上下间距。
+func vgap(h float32) fyne.CanvasObject {
+	r := canvas.NewRectangle(colTrans)
+	r.SetMinSize(fyne.NewSize(1, h))
+	return r
+}
+
+// stoppedPill .stopped-msg：bg-soft、7px 圆角、fit-content
+func (m *MainWindow) stoppedPill() fyne.CanvasObject {
+	l := widget.NewLabel("■ 已停止生成")
+	card := container.NewMax(canvas.NewRectangle(colSoft), container.NewPadded(l))
+	return container.NewHBox(container.NewGridWrap(fyne.NewSize(124, 32), card))
+}
+
+// layoutSpacer 占位，用于顶开右侧元素。
+func layoutSpacer() fyne.CanvasObject {
+	r := canvas.NewRectangle(colTrans)
+	r.SetMinSize(fyne.NewSize(1, 1))
+	return r
 }
 
 func (m *MainWindow) toolSummary(tools []model.ToolCall) string {

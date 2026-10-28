@@ -7,8 +7,10 @@ mod claude;
 mod db;
 mod model;
 mod service;
+mod theme;
 
 use eframe::egui;
+use egui::Color32;
 use model::*;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -29,6 +31,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             install_cjk_font(&cc.egui_ctx);
+            theme::apply(&cc.egui_ctx, &theme::LIGHT);
             Ok(Box::new(App::new()))
         }),
     )
@@ -111,6 +114,10 @@ struct App {
     pending_delete: Option<(String, String, bool)>, // (id, 名称, 是工作区)
     renaming: Option<(String, String, bool)>,       // (id, 当前名称, 是工作区)
 
+    // 外观与侧栏角标
+    dark: bool,
+    trash_count: usize,
+
     // 上下文面板 / 回收站 / 文件预览
     show_context: bool,
     show_trash: bool,
@@ -149,6 +156,8 @@ impl App {
             new_ws_name: String::new(),
             pending_delete: None,
             renaming: None,
+            dark: false,
+            trash_count: 0,
             show_context: false,
             show_trash: false,
             trash: vec![],
@@ -167,6 +176,14 @@ impl App {
             Ok(c) => {
                 app.conn = Some(c);
                 app.reload();
+                // 默认选中第一个工作区，否则侧栏只剩两行空壳
+                app.current_ws = app.workspaces.first().map(|w| w.id.clone());
+                app.current_ses = app
+                    .sessions
+                    .iter()
+                    .find(|s| app.current_ws.as_deref() == Some(s.workspace_id.as_str()))
+                    .map(|s| s.id.clone());
+                app.load_messages();
             }
             Err(e) => app.db_error = Some(e),
         }
@@ -177,6 +194,7 @@ impl App {
         let Some(conn) = &self.conn else { return };
         self.workspaces = service::list_workspaces(conn);
         self.sessions = service::list_sessions(conn);
+        self.trash_count = service::list_deleted_sessions(conn).len();
     }
 
     fn load_messages(&mut self) {
@@ -416,11 +434,16 @@ impl App {
     }
 
     fn open_trash(&mut self) {
+        self.refresh_trash();
+        self.show_trash = true;
+    }
+
+    fn refresh_trash(&mut self) {
         self.trash = match &self.conn {
             Some(c) => service::list_deleted_sessions(c),
             None => vec![],
         };
-        self.show_trash = true;
+        self.trash_count = self.trash.len();
     }
 
     fn render_trash(&mut self, ctx: &egui::Context) {
@@ -539,6 +562,660 @@ impl App {
     }
 
     /// 删除确认弹窗。主界面和设置页共用。
+    // ════════════════ 设计稿界面 ════════════════
+    // 尺寸/颜色/间距逐项对照 prototype/20261027-界面原型.html
+
+    fn render_sidebar(&mut self, ctx: &egui::Context) {
+        let pal = theme::LIGHT;
+        egui::SidePanel::left("sidebar")
+            .resizable(false)
+            .exact_width(theme::SIDEBAR_W)
+            .frame(egui::Frame::none().fill(pal.bg_bar))
+            .show(ctx, |ui| {
+                // .side-top padding:12px / .btn-new-ws height:36px radius:8px
+                ui.add_space(12.0);
+                let btn_rect = egui::Rect::from_min_size(
+                    egui::pos2(ui.min_rect().left() + 12.0, ui.cursor().top()),
+                    egui::vec2(theme::SIDEBAR_W - 24.0, 36.0),
+                );
+                let btn_resp = ui.allocate_rect(btn_rect, egui::Sense::click());
+                let fill = if btn_resp.hovered() { pal.green_h } else { pal.green };
+                theme::round_rect(ui, btn_rect, 8, fill, None);
+                ui.painter().text(
+                    btn_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "＋  新建工作区",
+                    theme::font(theme::F_NEW_WS),
+                    Color32::WHITE,
+                );
+                if btn_resp.clicked() {
+                    self.show_new_ws = true;
+                }
+                ui.add_space(12.0);
+
+                let mut ws_action: Option<SessionAction> = None;
+                let mut ses_action: Option<SessionAction> = None;
+                let workspaces = self.workspaces.clone();
+                let sessions = self.sessions.clone();
+                let cur_ws = self.current_ws.clone();
+                let cur_ses = self.current_ses.clone();
+
+                // 底部固定栏：先算高度，把滚动区限制在剩余空间内，
+                // 否则 ScrollArea 会吃掉整个侧栏，三个按钮被挤到窗口外
+                let foot_h = 34.0 * 3.0 + 16.0 + 8.0;
+                let list_h = (ui.available_height() - foot_h).max(80.0);
+                egui::ScrollArea::vertical()
+                    .max_height(list_h)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for w in &workspaces {
+                            // .ws-head padding:7px 8px; margin:0 8px; radius:7px
+                            let row = egui::Rect::from_min_size(
+                                egui::pos2(ui.min_rect().left() + 8.0, ui.cursor().top()),
+                                egui::vec2(theme::SIDEBAR_W - 16.0, 30.0),
+                            );
+                            let resp = ui.allocate_rect(row, egui::Sense::click());
+                            if resp.hovered() {
+                                theme::round_rect(ui, row, 7, pal.bg_hover, None);
+                            }
+                            {
+                                let p = ui.painter();
+                                p.text(
+                                    egui::pos2(row.left() + 10.0, row.center().y),
+                                    egui::Align2::CENTER_CENTER,
+                                    "v",
+                                    theme::font(9.0),
+                                    pal.t4,
+                                );
+                                p.text(
+                                    egui::pos2(row.left() + 28.0, row.center().y),
+                                    egui::Align2::CENTER_CENTER,
+                                    "▪",
+                                    theme::font(11.0),
+                                    pal.t3,
+                                );
+                            }
+                            let count = sessions.iter().filter(|s| s.workspace_id == w.id).count();
+                            let name_galley = theme::ellipsis(
+                                ui,
+                                &w.name,
+                                theme::font(theme::F_WS_NAME),
+                                pal.t1,
+                                row.width() - 100.0,
+                            );
+                            ui.painter().galley(
+                                egui::pos2(
+                                    row.left() + 44.0,
+                                    row.center().y - name_galley.size().y / 2.0,
+                                ),
+                                name_galley,
+                                pal.t1,
+                            );
+                            // .ws-count 11px bg-soft radius:8px
+                            let cnt_rect = egui::Rect::from_center_size(
+                                egui::pos2(row.right() - 34.0, row.center().y),
+                                egui::vec2(20.0, 16.0),
+                            );
+                            theme::round_rect(ui, cnt_rect, 8, pal.bg_soft, None);
+                            ui.painter().text(
+                                cnt_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                count.to_string(),
+                                theme::font(theme::F_WS_COUNT),
+                                pal.t4,
+                            );
+                            // .row-btn.add：hover 才显示
+                            let add_rect = egui::Rect::from_center_size(
+                                egui::pos2(row.right() - 12.0, row.center().y),
+                                egui::vec2(24.0, 24.0),
+                            );
+                            let add_resp = ui.interact(
+                                add_rect,
+                                ui.id().with(("ws-add", w.id.as_str())),
+                                egui::Sense::click(),
+                            );
+                            if resp.hovered() || add_resp.hovered() {
+                                let c = if add_resp.hovered() { pal.green_t } else { pal.green };
+                                ui.painter().text(
+                                    add_rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    "＋",
+                                    theme::font(15.0),
+                                    c,
+                                );
+                            }
+                            if add_resp.clicked() {
+                                self.current_ws = Some(w.id.clone());
+                                if let Some(c) = &self.conn {
+                                    match service::create_session(c, &w.id) {
+                                        Ok(_) => {
+                                            self.reload();
+                                            self.status = "已新建会话".into();
+                                        }
+                                        Err(e) => self.status = e,
+                                    }
+                                }
+                            }
+                            if resp.clicked() {
+                                self.current_ws = Some(w.id.clone());
+                                self.current_ses = None;
+                                self.messages.clear();
+                            }
+                            resp.context_menu(|ui| {
+                                if ui.button("重命名").clicked() {
+                                    ws_action =
+                                        Some(SessionAction::Rename(w.id.clone(), w.name.clone()));
+                                    ui.close_menu();
+                                }
+                                let label = if w.pinned_at.is_some() { "取消置顶" } else { "置顶" };
+                                if ui.button(label).clicked() {
+                                    ws_action =
+                                        Some(SessionAction::Pin(w.id.clone(), w.pinned_at.is_none()));
+                                    ui.close_menu();
+                                }
+                                if ui.button("移除").clicked() {
+                                    ws_action =
+                                        Some(SessionAction::Delete(w.id.clone(), w.name.clone()));
+                                    ui.close_menu();
+                                }
+                            });
+
+                            // .chat-item margin:1px 8px 1px 26px
+                            if cur_ws.as_deref() == Some(w.id.as_str()) {
+                                let mine: Vec<SessionSummary> = sessions
+                                    .iter()
+                                    .filter(|s| s.workspace_id == w.id)
+                                    .cloned()
+                                    .collect();
+                                if mine.is_empty() {
+                                    let r = egui::Rect::from_min_size(
+                                        egui::pos2(ui.min_rect().left() + 26.0, ui.cursor().top()),
+                                        egui::vec2(theme::SIDEBAR_W - 52.0, 20.0),
+                                    );
+                                    ui.painter().text(
+                                        egui::pos2(r.left(), r.center().y),
+                                        egui::Align2::LEFT_CENTER,
+                                        "暂无会话，点上方 ＋ 新建",
+                                        theme::font(12.0),
+                                        pal.t4,
+                                    );
+                                    ui.allocate_rect(r, egui::Sense::hover());
+                                }
+                                for s in &mine {
+                                    let item = egui::Rect::from_min_size(
+                                        egui::pos2(ui.min_rect().left() + 26.0, ui.cursor().top()),
+                                        egui::vec2(theme::SIDEBAR_W - 34.0, 30.0),
+                                    );
+                                    let on = cur_ses.as_deref() == Some(s.id.as_str());
+                                    let r = ui.allocate_rect(item, egui::Sense::click());
+                                    if on {
+                                        theme::round_rect(ui, item, 7, pal.green_soft, Some(egui::Stroke::new(1.0_f32, pal.green.gamma_multiply(0.45))));
+                                    } else if r.hovered() {
+                                        theme::round_rect(ui, item, 7, pal.bg_hover, None);
+                                    }
+                                    let title = if s.title.is_empty() {
+                                        "(新会话)"
+                                    } else {
+                                        s.title.as_str()
+                                    };
+                                    let col = if on { pal.green } else { pal.t1 };
+                                    let g = theme::ellipsis(
+                                        ui,
+                                        title,
+                                        theme::font(theme::F_CHAT),
+                                        col,
+                                        item.width() - 60.0,
+                                    );
+                                    ui.painter().galley(
+                                        egui::pos2(
+                                            item.left() + 8.0,
+                                            item.center().y - g.size().y / 2.0,
+                                        ),
+                                        g,
+                                        col,
+                                    );
+                                    let dot_c = if s.running { pal.green } else { pal.line3 };
+                                    ui.painter().circle_filled(
+                                        egui::pos2(item.right() - 10.0, item.center().y),
+                                        3.0,
+                                        dot_c,
+                                    );
+                                    if r.clicked() {
+                                        self.current_ses = Some(s.id.clone());
+                                        self.load_messages();
+                                    }
+                                    r.context_menu(|ui| {
+                                        if ui.button("重命名").clicked() {
+                                            ses_action = Some(SessionAction::Rename(
+                                                s.id.clone(),
+                                                s.title.clone(),
+                                            ));
+                                            ui.close_menu();
+                                        }
+                                        let label = if s.pinned_at.is_some() {
+                                            "取消置顶"
+                                        } else {
+                                            "置顶"
+                                        };
+                                        if ui.button(label).clicked() {
+                                            ses_action = Some(SessionAction::Pin(
+                                                s.id.clone(),
+                                                s.pinned_at.is_none(),
+                                            ));
+                                            ui.close_menu();
+                                        }
+                                        if ui.button("复制会话").clicked() {
+                                            ses_action =
+                                                Some(SessionAction::Duplicate(s.id.clone()));
+                                            ui.close_menu();
+                                        }
+                                        if ui.button("删除").clicked() {
+                                            ses_action = Some(SessionAction::Delete(
+                                                s.id.clone(),
+                                                title.to_string(),
+                                            ));
+                                            ui.close_menu();
+                                        }
+                                    });
+                                }
+                            }
+                            ui.add_space(6.0);
+                        }
+                        ui.add_space(8.0);
+                    });
+
+                match ws_action {
+                    Some(SessionAction::Rename(id, name)) => self.renaming = Some((id, name, true)),
+                    Some(SessionAction::Pin(id, pinned)) => {
+                        if let Some(c) = &self.conn {
+                            match service::pin_workspace(c, &id, pinned) {
+                                Ok(()) => self.reload(),
+                                Err(e) => self.status = e,
+                            }
+                        }
+                    }
+                    Some(SessionAction::Delete(id, name)) => {
+                        if let Some(c) = &self.conn {
+                            match service::remove_workspace(c, &id) {
+                                Ok(()) => {
+                                    self.current_ws = None;
+                                    self.reload();
+                                    self.status = format!("已移除「{name}」");
+                                }
+                                Err(e) => self.status = e,
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                match ses_action {
+                    Some(SessionAction::Rename(id, title)) => self.renaming = Some((id, title, false)),
+                    Some(SessionAction::Pin(id, pinned)) => {
+                        if let Some(c) = &self.conn {
+                            match service::pin_session(c, &id, pinned) {
+                                Ok(()) => self.reload(),
+                                Err(e) => self.status = e,
+                            }
+                        }
+                    }
+                    Some(SessionAction::Duplicate(id)) => {
+                        if let Some(c) = &self.conn {
+                            match service::duplicate_session(c, &id) {
+                                Ok(_) => self.reload(),
+                                Err(e) => self.status = e,
+                            }
+                        }
+                    }
+                    Some(SessionAction::Delete(id, title)) => {
+                        self.pending_delete = Some((id, title, false))
+                    }
+                    None => {}
+                }
+
+                // .side-foot padding:8px border-top
+                theme::hline(ui, &pal);
+                ui.add_space(8.0);
+                let deleted_n = self.trash_count;
+                self.foot_btn(ui, &pal, "◑", "暗色模式", None, |me| {
+                    me.dark = !me.dark;
+                });
+                self.foot_btn(ui, &pal, "≡", "回收站", Some(deleted_n), |me| {
+                    me.open_trash();
+                });
+                self.foot_btn(ui, &pal, "⚙", "设置", None, |me| {
+                    me.open_settings();
+                });
+                ui.add_space(8.0);
+            });
+    }
+
+    /// .foot-btn：height:34px padding:0 9px radius:7px font-size:12.5px
+    fn foot_btn(
+        &mut self,
+        ui: &mut egui::Ui,
+        pal: &theme::Pal,
+        icon: &str,
+        label: &str,
+        badge: Option<usize>,
+        on_click: impl FnOnce(&mut Self),
+    ) {
+        let row = egui::Rect::from_min_size(
+            egui::pos2(ui.min_rect().left() + 8.0, ui.cursor().top()),
+            egui::vec2(theme::SIDEBAR_W - 16.0, 34.0),
+        );
+        let r = ui.allocate_rect(row, egui::Sense::click());
+        if r.hovered() {
+            theme::round_rect(ui, row, 7, pal.bg_hover, None);
+        }
+        ui.painter().text(
+            egui::pos2(row.left() + 18.0, row.center().y),
+            egui::Align2::CENTER_CENTER,
+            icon,
+            theme::font(13.0),
+            pal.t3,
+        );
+        ui.painter().text(
+            egui::pos2(row.left() + 34.0, row.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            theme::font(theme::F_FOOT),
+            if r.hovered() { pal.t1 } else { pal.t2 },
+        );
+        if let Some(n) = badge {
+            if n > 0 {
+                let br = egui::Rect::from_center_size(
+                    egui::pos2(row.right() - 18.0, row.center().y),
+                    egui::vec2(22.0, 16.0),
+                );
+                theme::round_rect(ui, br, 8, pal.bg_soft, None);
+                ui.painter().text(
+                    br.center(),
+                    egui::Align2::CENTER_CENTER,
+                    n.to_string(),
+                    theme::font(10.5),
+                    pal.t4,
+                );
+            }
+        }
+        if r.clicked() {
+            on_click(self);
+        }
+    }
+
+    /// .composer-wrap padding:14px 28px 16px + .composer max-width:720px radius:14px
+    fn render_composer(&mut self, ctx: &egui::Context) {
+        let pal = theme::LIGHT;
+        egui::TopBottomPanel::bottom("composer")
+            .frame(egui::Frame::none().fill(pal.bg))
+            .show(ctx, |ui| {
+                ui.add_space(14.0);
+                let avail = ui.available_width();
+                let box_w = theme::THREAD_MAX_W.min(avail - 56.0);
+                let left = ui.min_rect().left() + (avail - box_w) / 2.0;
+                let top = ui.cursor().top();
+
+                let text_h = 52.0;
+                let total_h = text_h + theme::COMPOSER_BAR_H;
+                let rect =
+                    egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(box_w, total_h));
+                theme::round_rect(
+                    ui,
+                    rect,
+                    14,
+                    pal.surface,
+                    Some(egui::Stroke::new(1.0_f32, pal.line2)),
+                );
+
+                let mut send_now = false;
+                let text_rect = egui::Rect::from_min_size(
+                    egui::pos2(left + 16.0, top + 12.0),
+                    egui::vec2(box_w - 32.0, text_h - 20.0),
+                );
+                ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
+                    let te = egui::TextEdit::multiline(&mut self.input)
+                        .frame(false)
+                        .desired_width(f32::INFINITY)
+                        .font(theme::font(theme::F_BUBBLE))
+                        .hint_text(
+                            egui::RichText::new("描述你想让它做的事，或输入 / 调用命令与 Skill...")
+                                .font(theme::font(theme::F_BUBBLE))
+                                .color(pal.t4),
+                        );
+                    let r = ui.add_sized([text_rect.width(), text_rect.height()], te);
+                    if r.has_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift)
+                    {
+                        send_now = true;
+                    }
+                });
+
+                let bar_y = top + text_h;
+                let plus_rect = egui::Rect::from_min_size(
+                    egui::pos2(left + 10.0, bar_y + 7.0),
+                    egui::vec2(28.0, 28.0),
+                );
+                ui.painter().text(
+                    plus_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "＋",
+                    theme::font(16.0),
+                    pal.t3,
+                );
+
+                let send_rect = egui::Rect::from_min_size(
+                    egui::pos2(left + box_w - 40.0, bar_y + 6.0),
+                    egui::vec2(30.0, 30.0),
+                );
+                let can = !self.streaming && !self.input.trim().is_empty();
+                let hovering = ui.rect_contains_pointer(send_rect);
+                let send_fill = if self.streaming {
+                    pal.red
+                } else if can {
+                    if hovering {
+                        pal.green_h
+                    } else {
+                        pal.green
+                    }
+                } else {
+                    pal.green.gamma_multiply(0.4)
+                };
+                theme::round_rect(ui, send_rect, 8, send_fill, None);
+                ui.painter().text(
+                    send_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    if self.streaming { "■" } else { "↑" },
+                    theme::font(15.0),
+                    Color32::WHITE,
+                );
+                let send_resp = ui.interact(send_rect, ui.id().with("send"), egui::Sense::click());
+                if send_resp.clicked() {
+                    if self.streaming {
+                        self.streaming = false;
+                        self.status = "已停止".into();
+                    } else if can {
+                        send_now = true;
+                    }
+                }
+
+                // .ctx-bar 64x4 + 百分比
+                let pct = self
+                    .current_ses
+                    .as_ref()
+                    .and_then(|id| self.sessions.iter().find(|s| &s.id == id))
+                    .map(|s| s.context_percent)
+                    .unwrap_or(0.0);
+                let bar_rect = egui::Rect::from_min_size(
+                    egui::pos2(send_rect.left() - 110.0, bar_y + 19.0),
+                    egui::vec2(64.0, 4.0),
+                );
+                let w_pct = bar_rect.width() * (pct as f32 / 100.0);
+                theme::round_rect(ui, bar_rect, 2, pal.bg_soft, None);
+                if w_pct > 1.0 {
+                    let w = w_pct;
+                    theme::round_rect(
+                        ui,
+                        egui::Rect::from_min_size(bar_rect.min, egui::vec2(w, 4.0)),
+                        2,
+                        pal.green,
+                        None,
+                    );
+                }
+                ui.painter().text(
+                    egui::pos2(bar_rect.left() - 8.0, bar_rect.center().y),
+                    egui::Align2::RIGHT_CENTER,
+                    format!("{}%", pct.round() as i64),
+                    theme::font(11.5),
+                    pal.t3,
+                );
+
+                // .cm-hint 11px 居中
+                ui.allocate_rect(
+                    egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(box_w, total_h)),
+                    egui::Sense::hover(),
+                );
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.add_space((avail - 200.0) / 2.0);
+                    ui.label(
+                        egui::RichText::new("Enter 发送 · Shift + Enter 换行")
+                            .font(theme::font(theme::F_HINT))
+                            .color(pal.t4),
+                    );
+                });
+                ui.add_space(16.0);
+
+                if send_now {
+                    self.send(ctx);
+                }
+            });
+    }
+
+    /// .main-head 48px + .thread max-width:720px
+    fn render_thread(&mut self, ctx: &egui::Context) {
+        let pal = theme::LIGHT;
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(pal.bg))
+            .show(ctx, |ui| {
+                let head = egui::Rect::from_min_size(
+                    ui.min_rect().min,
+                    egui::vec2(ui.available_width(), theme::HEAD_H),
+                );
+                ui.painter()
+                    .hline(head.x_range(), head.bottom(), egui::Stroke::new(1.0_f32, pal.line));
+
+                let ses = self
+                    .current_ses
+                    .as_ref()
+                    .and_then(|id| self.sessions.iter().find(|s| &s.id == id))
+                    .cloned();
+                let title = ses
+                    .as_ref()
+                    .map(|s| {
+                        if s.title.is_empty() {
+                            "(新会话)".to_string()
+                        } else {
+                            s.title.clone()
+                        }
+                    })
+                    .unwrap_or_else(|| "未选择会话".into());
+                let ws_name = ses
+                    .as_ref()
+                    .and_then(|s| self.workspaces.iter().find(|w| w.id == s.workspace_id))
+                    .map(|w| w.name.clone())
+                    .unwrap_or_default();
+
+                let title_w = ui.fonts(|f| {
+                    f.layout_no_wrap(title.clone(), theme::font(theme::F_MH_TITLE), pal.t1)
+                        .size()
+                        .x
+                });
+                ui.painter().text(
+                    egui::pos2(head.left() + 24.0, head.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    &title,
+                    theme::font(theme::F_MH_TITLE),
+                    pal.t1,
+                );
+                if !ws_name.is_empty() {
+                    ui.painter().text(
+                        egui::pos2(head.left() + 24.0 + title_w + 10.0, head.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        format!("· {ws_name}"),
+                        theme::font(theme::F_MH_WS),
+                        pal.t4,
+                    );
+                }
+
+                let mut x = head.right() - 24.0;
+                for (id, glyph) in [("del", "删"), ("trash", "回"), ("set", "设")] {
+                    let br = egui::Rect::from_center_size(
+                        egui::pos2(x - 14.0, head.center().y),
+                        egui::vec2(28.0, 28.0),
+                    );
+                    let r = ui.interact(br, ui.id().with(("mh", id)), egui::Sense::click());
+                    if r.hovered() {
+                        theme::round_rect(ui, br, 6, pal.bg_hover, None);
+                    }
+                    ui.painter().text(
+                        br.center(),
+                        egui::Align2::CENTER_CENTER,
+                        glyph,
+                        theme::font(14.0),
+                        if r.hovered() { pal.t1 } else { pal.t3 },
+                    );
+                    if r.clicked() {
+                        match id {
+                            "set" => self.open_settings(),
+                            "trash" => self.open_trash(),
+                            _ => match &ses {
+                                Some(s) => {
+                                    let t = if s.title.is_empty() {
+                                        "(新会话)".to_string()
+                                    } else {
+                                        s.title.clone()
+                                    };
+                                    self.pending_delete = Some((s.id.clone(), t, false));
+                                }
+                                None => self.status = "请先选择一个会话".into(),
+                            },
+                        }
+                    }
+                    x -= 32.0;
+                }
+
+                let body_top = head.bottom();
+                let avail = ui.available_width();
+                let inner_w = theme::THREAD_MAX_W.min(avail - 56.0);
+                let left = ui.min_rect().left() + (avail - inner_w) / 2.0;
+                let list_rect = egui::Rect::from_min_max(
+                    egui::pos2(ui.min_rect().left(), body_top),
+                    egui::pos2(ui.max_rect().right(), ui.max_rect().bottom()),
+                );
+                let mut preview: Option<String> = None;
+                ui.scope_builder(egui::UiBuilder::new().max_rect(list_rect), |ui| {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .stick_to_bottom(true)
+                        .show(ui, |ui| {
+                            ui.add_space(26.0);
+                            let msgs = self.messages.clone();
+                            for m in &msgs {
+                                if m.role == "user" {
+                                    draw_user_bubble(ui, &pal, m, left, inner_w);
+                                } else {
+                                    draw_ai_message(ui, &pal, m, left, inner_w, &mut preview);
+                                }
+                            }
+                            ui.add_space(32.0);
+                        });
+                });
+                ui.allocate_rect(list_rect, egui::Sense::hover());
+                if let Some(p) = preview {
+                    self.open_file(p);
+                }
+            });
+    }
+
     fn render_delete_dialog(&mut self, ctx: &egui::Context) {
         let Some((id, name, is_ws)) = self.pending_delete.clone() else { return };
         let mut open = true;
@@ -998,258 +1675,9 @@ impl eframe::App for App {
             return;
         }
 
-        egui::SidePanel::left("sidebar")
-            .resizable(true)
-            .default_width(250.0)
-            .show(ctx, |ui| {
-                // 工作区标题行：[工作区] ...... [＋]
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("工作区").small().weak());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("＋").on_hover_text("新建工作区").clicked() {
-                            self.show_new_ws = true;
-                        }
-                    });
-                });
-
-                let mut ws_action: Option<SessionAction> = None;
-                let workspaces = self.workspaces.clone();
-                egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
-                    for w in &workspaces {
-                        let pin = if w.pinned_at.is_some() { "• " } else { "" };
-                        let selected = self.current_ws.as_deref() == Some(&w.id);
-                        let resp = ui
-                            .selectable_label(selected, format!("{pin}{}", w.name))
-                            .on_hover_text("右键：重命名 / 置顶 / 移除");
-                        if resp.clicked() {
-                            self.current_ws = Some(w.id.clone());
-                            self.current_ses = None;
-                            self.messages.clear();
-                        }
-                        resp.context_menu(|ui| {
-                            if ui.button("重命名").clicked() {
-                                ws_action = Some(SessionAction::Rename(w.id.clone(), w.name.clone()));
-                                ui.close_menu();
-                            }
-                            let pin_label = if w.pinned_at.is_some() { "取消置顶" } else { "置顶" };
-                            if ui.button(pin_label).clicked() {
-                                ws_action = Some(SessionAction::Pin(w.id.clone(), w.pinned_at.is_none()));
-                                ui.close_menu();
-                            }
-                            if ui.button("移除").clicked() {
-                                ws_action = Some(SessionAction::Delete(w.id.clone(), w.name.clone()));
-                                ui.close_menu();
-                            }
-                        });
-                    }
-                });
-                // 工作区的重命名复用同一个对话框，靠 is_ws 区分
-                match ws_action {
-                    Some(SessionAction::Rename(id, name)) => self.renaming = Some((id, name, true)),
-                    Some(SessionAction::Pin(id, pinned)) => {
-                        if let Some(c) = &self.conn {
-                            match service::pin_workspace(c, &id, pinned) {
-                                Ok(()) => self.reload(),
-                                Err(e) => self.status = e,
-                            }
-                        }
-                    }
-                    Some(SessionAction::Delete(id, name)) => {
-                        if let Some(c) = &self.conn {
-                            match service::remove_workspace(c, &id) {
-                                Ok(()) => {
-                                    self.current_ws = None;
-                                    self.reload();
-                                    self.status = format!("已移除「{name}」");
-                                }
-                                Err(e) => self.status = e,
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-
-                ui.separator();
-                // 会话标题行：[会话] ...... [＋]
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("会话").small().weak());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("＋").on_hover_text("新建会话").clicked() {
-                            if let (Some(conn), Some(ws)) = (&self.conn, self.current_ws.clone()) {
-                                match service::create_session(conn, &ws) {
-                                    Ok(_) => {
-                                        self.reload();
-                                        self.status = "已新建会话".into();
-                                    }
-                                    Err(e) => self.status = e,
-                                }
-                            } else {
-                                self.status = "请先选择一个工作区".into();
-                            }
-                        }
-                    });
-                });
-
-                let sessions: Vec<SessionSummary> = self
-                    .sessions
-                    .iter()
-                    .filter(|s| {
-                        self.current_ws.is_none() || self.current_ws.as_deref() == Some(&s.workspace_id)
-                    })
-                    .cloned()
-                    .collect();
-
-                let mut action: Option<SessionAction> = None;
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for s in &sessions {
-                        let title = if s.title.is_empty() { "(新会话)" } else { &s.title };
-                        let pin = if s.pinned_at.is_some() { "• " } else { "" };
-                        let selected = self.current_ses.as_deref() == Some(&s.id);
-                        let resp = ui
-                            .selectable_label(selected, format!("{pin}{title}"))
-                            .on_hover_text("右键：重命名 / 置顶 / 复制 / 删除");
-                        if resp.clicked() {
-                            self.current_ses = Some(s.id.clone());
-                            self.load_messages();
-                        }
-                        resp.context_menu(|ui| {
-                            if ui.button("重命名").clicked() {
-                                action = Some(SessionAction::Rename(s.id.clone(), s.title.clone()));
-                                ui.close_menu();
-                            }
-                            let pin_label = if s.pinned_at.is_some() { "取消置顶" } else { "置顶" };
-                            if ui.button(pin_label).clicked() {
-                                action = Some(SessionAction::Pin(s.id.clone(), s.pinned_at.is_none()));
-                                ui.close_menu();
-                            }
-                            if ui.button("复制会话").clicked() {
-                                action = Some(SessionAction::Duplicate(s.id.clone()));
-                                ui.close_menu();
-                            }
-                            if ui.button("删除").clicked() {
-                                action = Some(SessionAction::Delete(s.id.clone(), title.to_string()));
-                                ui.close_menu();
-                            }
-                        });
-                    }
-                });
-                match action {
-                    Some(SessionAction::Rename(id, title)) => self.renaming = Some((id, title, false)),
-                    Some(SessionAction::Pin(id, pinned)) => {
-                        if let Some(c) = &self.conn {
-                            match service::pin_session(c, &id, pinned) {
-                                Ok(()) => {
-                                    self.reload();
-                                    self.status = if pinned { "已置顶".into() } else { "已取消置顶".into() };
-                                }
-                                Err(e) => self.status = e,
-                            }
-                        }
-                    }
-                    Some(SessionAction::Duplicate(id)) => {
-                        if let Some(c) = &self.conn {
-                            match service::duplicate_session(c, &id) {
-                                Ok(s) => {
-                                    self.reload();
-                                    self.status = format!("已复制为「{}」", s.title);
-                                }
-                                Err(e) => self.status = e,
-                            }
-                        }
-                    }
-                    Some(SessionAction::Delete(id, title)) => {
-                        self.pending_delete = Some((id, title, false))
-                    }
-                    None => {}
-                }
-            });
-
-        egui::TopBottomPanel::bottom("composer")
-            .exact_height(120.0)
-            .show(ctx, |ui| {
-                ui.add_space(4.0);
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.input)
-                        .desired_rows(3)
-                        .desired_width(f32::INFINITY)
-                        .hint_text("描述你想让它做的事"),
-                );
-                ui.horizontal(|ui| {
-                    let send_enabled = !self.streaming && !self.input.trim().is_empty();
-                    if ui.add_enabled(send_enabled, egui::Button::new("发送")).clicked() {
-                        self.send(ctx);
-                    }
-                    if ui.add_enabled(self.streaming, egui::Button::new("停止")).clicked() {
-                        self.streaming = false;
-                        self.status = "已停止".into();
-                    }
-                    ui.separator();
-                    if ui.selectable_label(self.show_context, "上下文").clicked() {
-                        self.show_context = !self.show_context;
-                    }
-                    if ui.button("回收站").clicked() {
-                        self.open_trash();
-                    }
-                    ui.separator();
-                    ui.label(egui::RichText::new(&self.status).small().weak());
-                });
-            });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("设置").clicked() {
-                    self.open_settings();
-                }
-                let title = self
-                    .current_ses
-                    .as_ref()
-                    .and_then(|id| self.sessions.iter().find(|s| &s.id == id))
-                    .map(|s| if s.title.is_empty() { "(新会话)".to_string() } else { s.title.clone() })
-                    .unwrap_or_else(|| "未选择会话".into());
-                ui.heading(title);
-            });
-            ui.separator();
-
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .stick_to_bottom(true)
-                .show(ui, |ui| {
-                    let mut preview: Option<String> = None;
-                    for m in &self.messages {
-                        let is_user = m.role == "user";
-                        ui.horizontal_wrapped(|ui| {
-                            if is_user {
-                                ui.label(egui::RichText::new("你").small().weak());
-                            } else {
-                                ui.label(egui::RichText::new("C").small().weak().strong());
-                            }
-                            ui.label(&m.text);
-                        });
-                        if m.stopped {
-                            ui.label(egui::RichText::new("■ 已停止生成").small().italics().weak());
-                        }
-                        if !m.tools.is_empty() {
-                            let names: Vec<&str> = m.tools.iter().map(|t| t.name.as_str()).collect();
-                            ui.label(
-                                egui::RichText::new(format!("已处理 {} 步：{}", m.tools.len(), names.join(" · ")))
-                                    .small()
-                                    .weak(),
-                            );
-                            for t in &m.tools {
-                                if looks_like_path(&t.target)
-                                    && ui.link(&t.target).clicked()
-                                {
-                                    preview = Some(t.target.clone());
-                                }
-                            }
-                        }
-                        ui.add_space(6.0);
-                    }
-                    if let Some(p) = preview {
-                        self.open_file(p);
-                    }
-                });
-        });
+        self.render_sidebar(ctx);
+        self.render_composer(ctx);
+        self.render_thread(ctx);
 
         self.render_context_panel(ctx);
         self.render_delete_dialog(ctx);
@@ -1305,6 +1733,142 @@ impl eframe::App for App {
             }
         }
     }
+}
+
+/// 用户气泡：.msg-user .bubble radius:14px 14px 4px 14px bg-soft max-width:78%
+fn draw_user_bubble(
+    ui: &mut egui::Ui,
+    pal: &theme::Pal,
+    m: &ChatMessage,
+    left: f32,
+    inner_w: f32,
+) {
+    let max_w = inner_w * 0.78;
+    let galley = ui.fonts(|f| {
+        f.layout(
+            m.text.clone(),
+            theme::font(theme::F_BUBBLE),
+            pal.t1,
+            max_w - 30.0,
+        )
+    });
+    let pad = egui::vec2(15.0, 10.0);
+    let size = egui::vec2(
+        (galley.size().x + pad.x * 2.0).min(max_w),
+        galley.size().y + pad.y * 2.0,
+    );
+    let rect = egui::Rect::from_min_size(
+        egui::pos2(left + inner_w - size.x, ui.cursor().top()),
+        size,
+    );
+    theme::round_rect(ui, rect, 14, pal.bg_soft, None);
+    // 右下角收成 4px：盖一个方角
+    ui.painter().rect_filled(
+        egui::Rect::from_min_max(
+            egui::pos2(rect.right() - 8.0, rect.bottom() - 8.0),
+            rect.right_bottom(),
+        ),
+        0.0,
+        pal.bg_soft,
+    );
+    ui.painter().galley(rect.min + pad, galley, pal.t1);
+    ui.allocate_rect(rect, egui::Sense::hover());
+    ui.add_space(26.0);
+}
+
+/// 助手消息：.a-avatar 26px radius:8px + .ai-role + .ai-text
+fn draw_ai_message(
+    ui: &mut egui::Ui,
+    pal: &theme::Pal,
+    m: &ChatMessage,
+    left: f32,
+    inner_w: f32,
+    preview: &mut Option<String>,
+) {
+    let top = ui.cursor().top();
+    let av = egui::Rect::from_min_size(egui::pos2(left, top + 1.0), egui::vec2(26.0, 26.0));
+    theme::round_rect(ui, av, 8, pal.green_soft, None);
+    ui.painter().text(
+        av.center(),
+        egui::Align2::CENTER_CENTER,
+        "C",
+        theme::font(12.0),
+        pal.green,
+    );
+
+    let x = left + 38.0;
+    let w = inner_w - 38.0;
+
+    ui.painter().text(
+        egui::pos2(x, top + 9.0),
+        egui::Align2::LEFT_CENTER,
+        "Claude",
+        theme::font(theme::F_ROLE),
+        pal.t2,
+    );
+    let mut y = top + 24.0;
+
+    for t in &m.tools {
+        let g = theme::ellipsis(
+            ui,
+            &format!("{}  {}", t.name, t.target),
+            theme::font(11.5),
+            pal.t3,
+            w,
+        );
+        ui.painter().galley(egui::pos2(x, y), g, pal.t3);
+        let row = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, 18.0));
+        if looks_like_path(&t.target) {
+            let r = ui.interact(row, ui.id().with(("tool", t.target.as_str())), egui::Sense::click());
+            if r.hovered() {
+                ui.painter().text(
+                    egui::pos2(x, y),
+                    egui::Align2::LEFT_TOP,
+                    &t.target,
+                    theme::font(11.5),
+                    pal.green_t,
+                );
+            }
+            if r.clicked() {
+                *preview = Some(t.target.clone());
+            }
+        }
+        y += 18.0;
+    }
+    if !m.tools.is_empty() {
+        y += 6.0;
+    }
+
+    let galley = ui.fonts(|f| f.layout(m.text.clone(), theme::font(theme::F_AI), pal.t1, w));
+    let text_h = galley.size().y;
+    ui.painter().galley(egui::pos2(x, y), galley, pal.t1);
+    y += text_h;
+
+    if m.stopped {
+        y += 10.0;
+        let g = ui.fonts(|f| {
+            f.layout_no_wrap(
+                "■ 已停止生成".to_string(),
+                theme::font(theme::F_STOPPED),
+                pal.t3,
+            )
+        });
+        let r = egui::Rect::from_min_size(
+            egui::pos2(x, y),
+            egui::vec2(g.size().x + 22.0, g.size().y + 14.0),
+        );
+        theme::round_rect(ui, r, 7, pal.bg_soft, None);
+        ui.painter()
+            .galley(egui::pos2(r.left() + 11.0, r.top() + 7.0), g, pal.t3);
+        y = r.bottom();
+    }
+
+    let row = egui::Rect::from_min_size(
+        egui::pos2(left, top),
+        egui::vec2(inner_w, (y - top).max(26.0)),
+    );
+    ui.allocate_rect(row, egui::Sense::hover());
+    ui.add_space(26.0);
 }
 
 /// 工具调用的目标是否像可预览的文件路径。
