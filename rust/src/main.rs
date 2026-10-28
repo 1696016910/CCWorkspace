@@ -52,6 +52,14 @@ fn install_cjk_font(ctx: &egui::Context) {
         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttf",
     ];
 
+    // 粗体候选：egui 的 FontId 不带字重，只能靠单独注册一个字体族来表达 **加粗**
+    const BOLD_CANDIDATES: &[&str] = &[
+        r"C:\Windows\Fonts\Dengb.ttf",
+        r"C:\Windows\Fonts\msyhbd.ttf",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttf",
+    ];
+
     for path in CANDIDATES {
         let Ok(bytes) = std::fs::read(path) else { continue };
         let mut fonts = egui::FontDefinitions::default();
@@ -68,6 +76,22 @@ fn install_cjk_font(ctx: &egui::Context) {
             .entry(egui::FontFamily::Monospace)
             .or_default()
             .push("cjk".to_owned());
+
+        // 注册粗体族；找不到粗体文件时退回常规字体，界面不会因此报错
+        let bold_bytes = BOLD_CANDIDATES
+            .iter()
+            .find_map(|p| std::fs::read(p).ok());
+        if let Some(b) = bold_bytes {
+            fonts
+                .font_data
+                .insert("cjk-bold".to_owned(), egui::FontData::from_owned(b).into());
+            fonts.families.insert(
+                egui::FontFamily::Name("bold".into()),
+                vec!["cjk-bold".to_owned(), "cjk".to_owned()],
+            );
+            theme::set_bold_family(true);
+        }
+
         ctx.set_fonts(fonts);
         return;
     }

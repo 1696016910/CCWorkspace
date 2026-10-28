@@ -29,6 +29,7 @@ pub struct Pal {
     pub danger_bg: Color32,
     pub danger_line: Color32,
     pub danger_t: Color32,
+    pub blue: Color32,
 }
 
 const fn c(hex: u32) -> Color32 {
@@ -57,6 +58,7 @@ pub const LIGHT: Pal = Pal {
     danger_bg: c(0xfdf5f5),
     danger_line: c(0xf2dedd),
     danger_t: c(0xa33c34),
+    blue: c(0x1668c9),
 };
 
 pub const DARK: Pal = Pal {
@@ -81,6 +83,7 @@ pub const DARK: Pal = Pal {
     danger_bg: c(0x2a1e1e),
     danger_line: c(0x442e2e),
     danger_t: c(0xe8a9a4),
+    blue: c(0x6aa8e8),
 };
 
 // 字号：原型用 px，egui 的 FontId 等价于 px
@@ -107,6 +110,29 @@ pub const COMPOSER_BAR_H: f32 = 42.0; // .composer-bar
 
 pub fn font(size: f32) -> FontId {
     FontId::proportional(size)
+}
+
+/// 加粗字体。
+///
+/// egui 的自定义字体族缺失时不会回落，而是算出 0 尺寸把布局压塌
+/// （实测窗口会退化成 6x6）。所以这里用一个运行时开关：
+/// install_cjk_font 成功注册了 "bold" 族才用它。
+pub fn font_bold(size: f32) -> FontId {
+    if has_bold_family() {
+        FontId::new(size, egui::FontFamily::Name("bold".into()))
+    } else {
+        FontId::proportional(size)
+    }
+}
+
+static BOLD_FAMILY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_bold_family(v: bool) {
+    BOLD_FAMILY.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn has_bold_family() -> bool {
+    BOLD_FAMILY.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 pub fn mono(size: f32) -> FontId {
@@ -153,6 +179,16 @@ pub fn apply(ctx: &egui::Context, pal: &Pal) {
     };
     v.popup_shadow = v.window_shadow;
     style.visuals = v;
+    // 细滚动条：设计稿的滚动条是 6px 圆角细条，不是系统默认款
+    style.spacing.scroll = egui::style::ScrollStyle {
+        floating: false,
+        bar_width: 6.0,
+        handle_min_length: 24.0,
+        bar_inner_margin: 2.0,
+        bar_outer_margin: 2.0,
+        floating_width: 4.0,
+        ..Default::default()
+    };
     style.spacing.item_spacing = egui::vec2(0.0, 0.0);
     style.spacing.button_padding = egui::vec2(8.0, 4.0);
     ctx.set_style(style);
