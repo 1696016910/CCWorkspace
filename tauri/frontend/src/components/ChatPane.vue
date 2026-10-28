@@ -32,6 +32,25 @@ const workspaceName = computed(() => {
 
 /* ── 上下文 ── */
 const ctxOpen = ref(false)
+const compacting = ref(false)
+
+/** 压缩上下文：跑一轮 /compact，摘要落库后刷新面板与会话列表 */
+async function doCompact(): Promise<void> {
+  const id = current.value?.id
+  if (!id) return
+  compacting.value = true
+  try {
+    await chatApi.compact(id)
+    toast.success('上下文已压缩')
+    await sessions.load()
+    await sessions.select(id)
+    ctxOpen.value = false
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : '压缩失败')
+  } finally {
+    compacting.value = false
+  }
+}
 
 const ctxPercent = computed(() => current.value?.contextPercent ?? 0)
 
@@ -313,7 +332,7 @@ function openFile(path: string): void {
   <main class="main">
     <div class="main-head">
       <span class="mh-title" :title="current?.title ?? ''">{{
-        current?.title || '未选择会话'
+        current ? current.title || '(新会话)' : '未选择会话'
       }}</span>
       <span v-if="current" class="mh-ws" :title="workspaceName">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
@@ -453,8 +472,9 @@ function openFile(path: string): void {
       :percent="ctxPercent"
       :tokens="current?.contextTokens ?? 0"
       :max="current?.contextMax ?? 0"
-      info
+      :compacting="compacting"
       @close="ctxOpen = false"
+      @compact="doCompact"
     />
 
     <FileViewer v-if="viewingFile" :path="viewingFile" @close="viewingFile = null" />

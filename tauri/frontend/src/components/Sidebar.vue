@@ -271,9 +271,19 @@ function toggleTheme(): void {
 }
 
 /** 未命名的会话按顺序编号，避免列表里出现多个同名条目 */
+/**
+ * 列表里显示的标题。
+ *
+ * 后端存的空串表示"还没生成过标题"，与 '(新会话)' 是两种表示，
+ * 必须一起判断，否则空标题的会话会绕过编号，出现多个同名条目。
+ */
+function isUnnamed(s: SessionSummary): boolean {
+  return s.title === '' || s.title === '(新会话)'
+}
+
 function displayTitle(list: SessionSummary[], s: SessionSummary): string {
-  if (s.title !== '(新会话)') return s.title || '(新会话)'
-  const unnamed = list.filter((x) => x.title === '(新会话)' || x.title === '')
+  if (!isUnnamed(s)) return s.title
+  const unnamed = list.filter(isUnnamed)
   if (unnamed.length <= 1) return '(新会话)'
   const idx = unnamed.findIndex((x) => x.id === s.id)
   return `新会话 ${idx + 1}`

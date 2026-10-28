@@ -5,9 +5,10 @@ const props = defineProps<{
   percent: number
   tokens: number
   max: number
+  compacting?: boolean
 }>()
 
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; compact: [] }>()
 
 const pct = computed(() => {
   const p = props.percent
@@ -55,6 +56,10 @@ const free = computed(() => Math.max(props.max - props.tokens, 0))
       <div class="notice">
         <span>压缩会把历史对话摘要成一段更短的上下文，之后仍可继续对话，但细节会丢失。</span>
       </div>
+
+      <button class="compact-btn" :disabled="compacting" @click="emit('compact')">
+        {{ compacting ? '压缩中…' : '压缩上下文' }}
+      </button>
     </div>
   </div>
 </template>
@@ -168,7 +173,28 @@ const free = computed(() => Math.max(props.max - props.tokens, 0))
   color: var(--t3);
 }
 
+.compact-btn {
+  width: 100%;
+  height: 32px;
+  border-radius: 7px;
+  border: 1px solid var(--line-3);
+  background: var(--surface-2);
+  font-size: 12.5px;
+  color: var(--t1);
+}
+
+.compact-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: #bfc3c7;
+}
+
+.compact-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .notice {
+  margin-bottom: 12px;
   padding: 9px 11px;
   border-radius: 7px;
   background: var(--surface-2);

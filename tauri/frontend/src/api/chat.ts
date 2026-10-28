@@ -16,3 +16,8 @@ export function interrupt(): Promise<void> {
 export async function onEvent(handler: (e: ChatEvent) => void): Promise<UnlistenFn> {
   return listen<ChatEvent>('chat:event', (ev) => handler(ev.payload))
 }
+
+/** 压缩上下文，返回摘要文本。 */
+export function compact(sessionId: string): Promise<string> {
+  return call('context_compact', { sessionId })
+}

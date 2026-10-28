@@ -5,6 +5,7 @@
 mod claude;
 mod config;
 mod db;
+mod file;
 mod service;
 mod skills;
 
@@ -433,6 +434,70 @@ fn chat_send(
     Ok(run_id)
 }
 
+/// 压缩上下文：跑一轮 `/compact`，只把摘要落库，不写用户消息。
+#[tauri::command]
+fn context_compact(session_id: String) -> Result<String, String> {
+    let (cwd, resume) = db::with(|c| {
+        let sessions = service::list_sessions(c)?;
+        let s = sessions
+            .iter()
+            .find(|s| s.id == session_id)
+            .ok_or("会话不存在")?;
+        let ws = service::list_workspaces(c)?
+            .into_iter()
+            .find(|w| w.id == s.workspace_id)
+            .ok_or("会话所属工作区已被移除")?;
+        let resume = service::get_claude_session_id(c, &session_id).unwrap_or_default();
+        Ok((ws.path, resume))
+    })?;
+
+    let models = config::read_models()?;
+    let env: Vec<(String, String)> = config::read_env()?
+        .into_iter()
+        .map(|e| (e.key, e.value))
+        .collect();
+
+    let opts = claude::Options {
+        cwd,
+        text: "/compact".into(),
+        model: models.get("ANTHROPIC_MODEL").cloned().unwrap_or_default(),
+        resume,
+        mode: "acceptEdits".into(),
+        env,
+    };
+
+    // 压缩是同步等待的：调用方要拿到摘要结果才刷新面板
+    let mut summary = String::new();
+    let stop = Arc::new(AtomicBool::new(false));
+    claude::run(opts, stop, |ev| {
+        if let claude::Event::Text(d) = ev {
+            summary.push_str(&d);
+        }
+    })?;
+
+    if summary.trim().is_empty() {
+        return Err("压缩没有返回摘要".into());
+    }
+
+    db::with(|c| {
+        service::append_message(
+            c,
+            &session_id,
+            "assistant",
+            &format!("（上下文已压缩）
+
+{}", summary.trim()),
+            &[],
+            false,
+        )?;
+        // 压缩后旧快照必然失效，清零免得面板还显示压缩前的百分比
+        service::set_context_usage(c, &session_id, 0, 0, 0.0);
+        Ok(())
+    })?;
+
+    Ok(summary)
+}
+
 #[tauri::command]
 fn chat_interrupt(state: State<'_, AppState>) -> Result<(), String> {
     let active = state.active.lock().map_err(|_| "状态锁中毒")?;
@@ -441,6 +506,13 @@ fn chat_interrupt(state: State<'_, AppState>) -> Result<(), String> {
         let _ = run.run_id;
     }
     Ok(())
+}
+
+/// 读取工作区内的文本文件用于预览。
+#[tauri::command]
+fn file_read(path: String) -> Result<file::FileContent, String> {
+    let roots = db::with(|c| Ok(service::list_workspaces(c)?.into_iter().map(|w| w.path).collect::<Vec<_>>()))?;
+    file::read(&roots, &path)
 }
 
 // ── 应用信息 ──
@@ -497,8 +569,10 @@ fn main() {
             marketplace_list,
             marketplace_add,
             marketplace_remove,
+            file_read,
             chat_send,
             chat_interrupt,
+            context_compact,
             app_version,
         ])
         .run(tauri::generate_context!())

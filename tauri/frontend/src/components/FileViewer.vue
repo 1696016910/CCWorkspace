@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { renderMarkdown } from '@/utils/markdown'
+import * as fileApi from '@/api/file'
 
 const props = defineProps<{ path: string }>()
 const emit = defineEmits<{ close: [] }>()
@@ -9,26 +10,39 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const content = ref('')
 const mode = ref<'preview' | 'code'>('preview')
+const meta = ref<fileApi.FileContent | null>(null)
 
 const isMarkdown = computed(() => /\.(md|markdown)$/i.test(props.path))
 
 const name = computed(() => props.path.split(/[\/]/).pop() ?? props.path)
 
 const extLabel = computed(() => {
+  const e = meta.value?.ext ?? ''
   const m = /\.(\w+)$/.exec(props.path)
-  return m ? m[1].toUpperCase() : 'TEXT'
+  return m ? m[1].toUpperCase() : e ? e.slice(1).toUpperCase() : 'TEXT'
 })
 
 const previewHtml = computed(() => renderMarkdown(content.value))
 
 const lines = computed(() => content.value.split('\n'))
 
-onMounted(async () => {
-  // Tauri 的文件读取命令尚未接入（Node 版走 file:read IPC），
-  // 这里先如实提示，不假装读到了内容
-  loading.value = false
-  error.value = 'Tauri 版暂未接入文件读取，请先修复后再预览'
-})
+async function load(): Promise<void> {
+  loading.value = true
+  error.value = null
+  try {
+    const d = await fileApi.read(props.path)
+    meta.value = d
+    content.value = d.text
+    // Markdown 默认预览，其余直接看源码
+    mode.value = /^(md|markdown)$/i.test(d.ext) ? 'preview' : 'code'
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(load)
 
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape') emit('close')
