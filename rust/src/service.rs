@@ -133,6 +133,7 @@ fn map_session(r: &rusqlite::Row) -> rusqlite::Result<SessionSummary> {
         renamed: auto_title == 0,
         context_percent: r.get(10).unwrap_or(0.0),
         context_tokens: r.get(8).unwrap_or(0),
+        context_max: r.get(9).unwrap_or(0),
         pinned_at: r.get(11)?,
     })
 }
@@ -183,6 +184,7 @@ pub fn create_session(conn: &Connection, workspace_id: &str) -> Result<SessionSu
         renamed: false,
         context_percent: 0.0,
         context_tokens: 0,
+        context_max: 0,
         pinned_at: None,
     })
 }
@@ -304,6 +306,7 @@ pub fn duplicate_session(conn: &Connection, id: &str) -> Result<SessionSummary, 
         renamed: auto_title == 0,
         context_percent: 0.0,
         context_tokens: 0,
+        context_max: 0,
         pinned_at: None,
     })
 }

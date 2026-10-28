@@ -24,6 +24,8 @@ pub struct SessionSummary {
     pub renamed: bool,
     pub context_percent: f64,
     pub context_tokens: i64,
+    /// 上下文窗口大小（由 CLI 的 modelUsage.contextWindow 报上来）
+    pub context_max: i64,
     pub pinned_at: Option<String>,
 }
 

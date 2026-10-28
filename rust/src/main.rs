@@ -282,8 +282,40 @@ impl App {
                     }
                 }
                 if std::env::args().any(|a| a == "--trash") {
-                    app.open_trash();
+                    app.refresh_trash();
                     app.show_trash = true;
+                }
+                if std::env::args().any(|a| a == "--context") {
+                    app.show_context = true;
+                }
+                if std::env::args().any(|a| a == "--confirm") {
+                    app.pending_confirm = Some(Confirm {
+                        title: "删除会话「测试会话」？".into(),
+                        message: "会话将移到回收站，可以随时恢复。若该会话正在生成回复，会先停止。".into(),
+                        warning: None,
+                        confirm_text: "移到回收站".into(),
+                        tone: Tone::Warn,
+                        kind: ConfirmKind::DeleteSession(String::new()),
+                    });
+                }
+                if std::env::args().any(|a| a == "--file") {
+                    let md = "# 文件预览测试
+
+段落带 `行内代码`。
+
+```rust
+fn main() {
+    println!(\"hi\");
+}
+```
+
+- 列表项
+- 第二项
+";
+                    app.preview = Some(("D:/test/示例.md".into(), md.into()));
+                }
+                if std::env::args().any(|a| a == "--new-ws") {
+                    app.show_new_ws = true;
                 }
             }
             Err(e) => app.db_error = Some(e),
@@ -529,8 +561,13 @@ impl App {
             .cloned();
         let pct = ses.as_ref().map(|s| s.context_percent).unwrap_or(0.0);
         let tokens = ses.as_ref().map(|s| s.context_tokens).unwrap_or(0);
-        // 分母取 200k（Claude 的上下文窗口），与 CLI 报的一致
-        let max_tokens = 200_000.0_f32;
+        // 分母必须用库里存的 context_max：CLI 的实际窗口可能是 1M，
+        // 硬编码 200k 会把 18% 显示成 92%
+        let max_tokens = ses
+            .as_ref()
+            .map(|s| s.context_max as f32)
+            .filter(|v| *v > 0.0)
+            .unwrap_or(200_000.0);
 
         let w = 380.0_f32.min(screen.width() - 32.0);
         let h = 340.0;
@@ -1015,7 +1052,8 @@ impl App {
         // ── header 10px 12px ──
         let head_h = 49.0;
         let head = egui::Rect::from_min_size(rect.min, egui::vec2(w, head_h));
-        p.rect_filled(head, egui::Rounding::ZERO, pal.bg_bar);
+        // header 用上圆角，否则方角会盖住卡片左上/右上角
+        p.rect_filled(head, egui::Rounding { nw: 10.0, ne: 10.0, sw: 0.0, se: 0.0 }, pal.bg_bar);
         p.hline(head.x_range(), head.bottom(), Stroke::new(1.0_f32, pal.line));
 
         // 类型徽标 28x28
@@ -2004,8 +2042,21 @@ impl App {
         egui::SidePanel::left("sidebar")
             .resizable(false)
             .exact_width(theme::SIDEBAR_W)
-            .frame(egui::Frame::none().fill(pal.bg_bar))
+            // 显式给 1px line 描边并关掉 panel 默认分隔线：
+            // 默认那条是 egui 自带的灰线（实测 #bebebe），比设计稿的 #e6e6e8 深
+            .frame(
+                egui::Frame::none()
+                    .fill(pal.bg_bar)
+                    .stroke(egui::Stroke::NONE),
+            )
+            .show_separator_line(false)
             .show(ctx, |ui| {
+                // 侧栏右侧 1px 分隔线（#e6e6e8），与设计稿一致
+                ui.painter().vline(
+                    ui.max_rect().right() - 0.5,
+                    ui.max_rect().y_range(),
+                    egui::Stroke::new(1.0_f32, pal.line),
+                );
                 // .side-top padding:12px / .btn-new-ws height:36px radius:8px
                 ui.add_space(12.0);
                 let btn_rect = egui::Rect::from_min_size(
@@ -2389,7 +2440,9 @@ impl App {
                 let left = ui.min_rect().left() + (avail - box_w) / 2.0;
                 let top = ui.cursor().top();
 
-                let text_h = 52.0;
+                // textarea：rows=2 × line-height 22 + padding(14+8) = 66px，
+                // 与 Node 版 .composer textarea 的计算结果一致
+                let text_h = 66.0;
                 let total_h = text_h + theme::COMPOSER_BAR_H;
                 let rect =
                     egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(box_w, total_h));
@@ -2403,8 +2456,8 @@ impl App {
 
                 let mut send_now = false;
                 let text_rect = egui::Rect::from_min_size(
-                    egui::pos2(left + 16.0, top + 12.0),
-                    egui::vec2(box_w - 32.0, text_h - 20.0),
+                    egui::pos2(left + 16.0, top + 14.0),
+                    egui::vec2(box_w - 32.0, text_h - 22.0),
                 );
                 ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
                     let te = egui::TextEdit::multiline(&mut self.input)
@@ -2813,59 +2866,12 @@ impl eframe::App for App {
 
         self.render_chat_overlays(ctx, self.thread_rect);
         self.render_new_ws_dialog(ctx);
+        self.render_confirm(ctx);
         self.render_row_menu(ctx);
         self.render_context_panel(ctx);
         self.render_trash(ctx);
         self.render_preview(ctx);
 
-        // ── 新建工作区弹窗 ──
-        if self.show_new_ws {
-            let mut open = true;
-            egui::Window::new("新建工作区")
-                .open(&mut open)
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.label("项目目录");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.new_ws_path)
-                            .desired_width(360.0)
-                            .hint_text("绝对路径"),
-                    );
-                    ui.label("工作区名称（留空用目录名）");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.new_ws_name).desired_width(360.0),
-                    );
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        let can = !self.new_ws_path.trim().is_empty();
-                        if ui.add_enabled(can, egui::Button::new("创建")).clicked() {
-                            if let Some(conn) = &self.conn {
-                                match service::add_workspace(
-                                    conn,
-                                    &self.new_ws_path,
-                                    &self.new_ws_name,
-                                ) {
-                                    Ok(()) => {
-                                        self.reload();
-                                        self.show_new_ws = false;
-                                        self.new_ws_path.clear();
-                                        self.new_ws_name.clear();
-                                        self.status = "工作区已创建".into();
-                                    }
-                                    Err(e) => self.status = e,
-                                }
-                            }
-                        }
-                        if ui.button("取消").clicked() {
-                            self.show_new_ws = false;
-                        }
-                    });
-                });
-            if !open {
-                self.show_new_ws = false;
-            }
-        }
     }
 }
 
