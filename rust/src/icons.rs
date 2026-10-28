@@ -374,3 +374,19 @@ pub fn warn(p: &egui::Painter, r: Rect, color: Color32) {
     p.line_segment([Pos2::new(c.x, c.y - 1.5), Pos2::new(c.x, c.y + 2.0)], st);
     p.circle_filled(Pos2::new(c.x, c.y + 3.6), 0.9, color);
 }
+
+/// 向下箭头（回到最新）。
+pub fn arrow_down(p: &egui::Painter, r: Rect, color: Color32) {
+    let c = r.center();
+    let st = stroke(color, 2.0);
+    p.line_segment([Pos2::new(c.x, c.y - 4.5), Pos2::new(c.x, c.y + 4.5)], st);
+    poly(
+        p,
+        &[
+            Pos2::new(c.x - 3.4, c.y + 1.2),
+            Pos2::new(c.x, c.y + 4.6),
+            Pos2::new(c.x + 3.4, c.y + 1.2),
+        ],
+        st,
+    );
+}

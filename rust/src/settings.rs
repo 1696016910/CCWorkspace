@@ -297,6 +297,30 @@ pub(super) fn card_frame(pal: &Pal) -> egui::Frame {
         .inner_margin(egui::Margin::ZERO)
 }
 
+/// 同 card_row，但可指定行高。
+pub(super) fn card_row_h(
+    ui: &mut egui::Ui,
+    pal: &Pal,
+    last: bool,
+    h: f32,
+    draw: impl FnOnce(&mut egui::Ui, Rect),
+) {
+    let w = ui.available_width();
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, egui::Rounding::ZERO, pal.surface2);
+    }
+    if !last {
+        ui.painter()
+            .hline(rect.x_range(), rect.bottom(), Stroke::new(1.0_f32, pal.line));
+    }
+    let inner = Rect::from_min_max(
+        egui::pos2(rect.left() + 16.0, rect.top() + 12.0),
+        egui::pos2(rect.right() - 16.0, rect.bottom() - 12.0),
+    );
+    draw(ui, inner);
+}
+
 /// .st-rowx：padding 14px 16px，底部 1px 分隔
 pub(super) fn card_row(
     ui: &mut egui::Ui,
@@ -746,7 +770,7 @@ impl App {
             for i in 0..n {
                 let last = i + 1 == n;
                 let (key, label, _) = self.model_fields[i].clone();
-                card_row(ui, &pal, last, |ui, rect| {
+                card_row_h(ui, &pal, last, 76.0, |ui, rect| {
                     ui.painter().text(
                         egui::pos2(rect.left(), rect.top() + 8.0),
                         egui::Align2::LEFT_CENTER,
@@ -767,18 +791,32 @@ impl App {
                         egui::vec2(bw, 30.0),
                     );
                     let mut buf = self.model_fields[i].2.clone();
-                    ui.scope_builder(egui::UiBuilder::new().max_rect(br), |ui| {
-                        if ui
-                            .add(
-                                egui::TextEdit::singleline(&mut buf)
-                                    .font(theme::mono(12.0))
-                                    .desired_width(bw),
-                            )
-                            .changed()
-                        {
-                            self.model_fields[i].2 = buf;
-                        }
-                    });
+                    theme::round_rect(
+                        ui,
+                        br,
+                        6,
+                        pal.surface,
+                        Some(Stroke::new(1.0_f32, pal.line2)),
+                    );
+                    let mut child = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(egui::Rect::from_min_max(
+                                egui::pos2(br.left() + 8.0, br.top() + 5.0),
+                                egui::pos2(br.right() - 8.0, br.bottom() - 5.0),
+                            ))
+                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    );
+                    if child
+                        .add(
+                            egui::TextEdit::singleline(&mut buf)
+                                .frame(false)
+                                .font(theme::mono(12.0))
+                                .desired_width(bw - 16.0),
+                        )
+                        .changed()
+                    {
+                        self.model_fields[i].2 = buf;
+                    }
                 });
             }
         });
@@ -894,60 +932,251 @@ impl App {
     fn settings_plugins(&mut self, ui: &mut egui::Ui) {
         let pal = self.pal();
         settings_h1(ui, &pal, "插件");
-        settings_sub(ui, &pal, "已安装的插件。启用或禁用会影响下一次会话。");
+        settings_sub(
+            ui,
+            &pal,
+            "开关写入 settings.json 的 enabledPlugins。安装与卸载通过 claude plugin 执行。",
+        );
+
+        // 安装行：输入 + 按钮
+        let mut do_install = false;
+        ui.horizontal(|ui| {
+            let w = (ui.available_width() - 90.0).max(180.0);
+            ui.add_sized(
+                [w, 30.0],
+                egui::TextEdit::singleline(&mut self.plugin_input)
+                    .font(theme::mono(11.5))
+                    .hint_text("插件 ID，如 xxx@marketplace"),
+            );
+            ui.add_space(8.0);
+            // 只接受 name@marketplace 形式，避免无谓的 CLI 调用
+            let can = {
+                let v = self.plugin_input.trim();
+                v.contains('@')
+                    && v.split('@').count() == 2
+                    && v.chars().all(|c| c.is_alphanumeric() || matches!(c, '@' | '.' | '_' | '-'))
+            };
+            let bw = 72.0;
+            let (r, resp) = ui.allocate_exact_size(egui::vec2(bw, 30.0), egui::Sense::click());
+            let c = if !can {
+                pal.green.gamma_multiply(0.4)
+            } else if resp.hovered() {
+                pal.green_h
+            } else {
+                pal.green
+            };
+            theme::round_rect(ui, r, 6, c, None);
+            ui.painter().text(
+                r.center(),
+                egui::Align2::CENTER_CENTER,
+                "安装",
+                theme::font_bold(12.0),
+                Color32::WHITE,
+            );
+            if resp.clicked() && can {
+                do_install = true;
+            }
+        });
+        ui.add_space(14.0);
 
         let plugins = service::list_plugins();
         if plugins.is_empty() {
-            ui.label(
-                egui::RichText::new("没有已安装的插件，或 claude 命令不可用")
-                    .font(theme::font(12.0))
-                    .color(pal.t4),
+            // .empty-state padding 56px 20px
+            let (r, _) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), 120.0), egui::Sense::hover());
+            ui.painter().text(
+                egui::pos2(r.center().x, r.top() + 48.0),
+                egui::Align2::CENTER_CENTER,
+                "还没有安装插件",
+                theme::font(13.0),
+                pal.t2,
             );
-            return;
-        }
-        let mut toggle: Option<(String, bool)> = None;
-        let n = plugins.len();
-        card_frame(&pal).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            for (i, p) in plugins.iter().enumerate() {
-                card_row(ui, &pal, i + 1 == n, |ui, rect| {
-                    ui.painter().text(
-                        egui::pos2(rect.left(), rect.top() + 8.0),
-                        egui::Align2::LEFT_CENTER,
-                        &p.name,
-                        theme::font(13.0),
-                        pal.t1,
-                    );
-                    ui.painter().text(
-                        egui::pos2(rect.left(), rect.top() + 26.0),
-                        egui::Align2::LEFT_CENTER,
-                        format!("v{}", p.version),
-                        theme::mono(11.0),
-                        pal.t4,
-                    );
-                    let sw = egui::Rect::from_center_size(
-                        egui::pos2(rect.right() - 15.0, rect.center().y),
-                        egui::vec2(30.0, 16.0),
-                    );
-                    theme::round_rect(ui, sw, 8, if p.enabled { pal.green } else { pal.line3 }, None);
-                    let kx = if p.enabled { sw.right() - 8.0 } else { sw.left() + 8.0 };
-                    ui.painter()
-                        .circle_filled(egui::pos2(kx, sw.center().y), 6.0, Color32::WHITE);
-                    let r = ui.interact(
-                        egui::Rect::from_center_size(sw.center(), egui::vec2(40.0, 24.0)),
-                        ui.id().with(("plug", p.id.as_str())),
-                        egui::Sense::click(),
-                    );
-                    if r.clicked() {
-                        toggle = Some((p.id.clone(), !p.enabled));
+            ui.painter().text(
+                egui::pos2(r.center().x, r.top() + 72.0),
+                egui::Align2::CENTER_CENTER,
+                "在「插件仓库」中添加仓库后即可安装",
+                theme::font(12.0),
+                pal.t4,
+            );
+        } else {
+            // 自适应列数：minmax(clamp(220px, 24vw, 300px), 1fr)
+            let avail = ui.available_width();
+            let min_w = (avail * 0.24).clamp(220.0, 300.0);
+            let cols = ((avail + 10.0) / (min_w + 10.0)).floor().max(1.0) as usize;
+            let card_w = (avail - 10.0 * (cols as f32 - 1.0)) / cols as f32;
+
+            let mut toggle: Option<(String, bool)> = None;
+            let mut uninstall: Option<String> = None;
+
+            for chunk in plugins.chunks(cols) {
+                ui.horizontal(|ui| {
+                    for pl in chunk {
+                        let card_h = 96.0;
+                        let (rect, r) =
+                            ui.allocate_exact_size(egui::vec2(card_w, card_h), egui::Sense::hover());
+                        theme::round_rect(
+                            ui,
+                            rect,
+                            8,
+                            pal.surface,
+                            Some(Stroke::new(
+                                1.0_f32,
+                                if r.hovered() { pal.line3 } else { pal.line2 },
+                            )),
+                        );
+                        // 图标 30x30
+                        let ico = egui::Rect::from_min_size(
+                            egui::pos2(rect.left() + 13.0, rect.top() + 13.0),
+                            egui::vec2(30.0, 30.0),
+                        );
+                        theme::round_rect(
+                            ui,
+                            ico,
+                            6,
+                            pal.bg_soft,
+                            Some(Stroke::new(1.0_f32, pal.line)),
+                        );
+                        let initials: String = pl.name.chars().take(2).collect::<String>().to_uppercase();
+                        ui.painter().text(
+                            ico.center(),
+                            egui::Align2::CENTER_CENTER,
+                            initials,
+                            theme::mono(9.5),
+                            pal.t2,
+                        );
+                        // 名称 / 版本 · 仓库
+                        let bx = ico.right() + 11.0;
+                        let bg = crate::theme::ellipsis_ctx(
+                            ui.ctx(),
+                            &pl.name,
+                            theme::font_bold(12.5),
+                            pal.t1,
+                            rect.right() - bx - 13.0,
+                        );
+                        ui.painter().galley(egui::pos2(bx, rect.top() + 14.0), bg, pal.t1);
+                        let sub = if pl.version.is_empty() {
+                            pl.marketplace.clone()
+                        } else {
+                            format!("{} · {}", pl.version, pl.marketplace)
+                        };
+                        let sg = crate::theme::ellipsis_ctx(
+                            ui.ctx(),
+                            &sub,
+                            theme::font(11.0),
+                            pal.t4,
+                            rect.right() - bx - 13.0,
+                        );
+                        ui.painter().galley(egui::pos2(bx, rect.top() + 32.0), sg, pal.t4);
+
+                        // 分隔线 + 状态行
+                        let fy = rect.bottom() - 34.0;
+                        ui.painter().hline(
+                            (rect.left() + 13.0)..=(rect.right() - 13.0),
+                            fy,
+                            Stroke::new(1.0_f32, pal.line),
+                        );
+                        let dot_c = if pl.enabled { pal.green } else { Color32::from_rgb(0xc6, 0xc6, 0xcb) };
+                        ui.painter()
+                            .circle_filled(egui::pos2(rect.left() + 15.5, fy + 14.0), 2.5, dot_c);
+                        ui.painter().text(
+                            egui::pos2(rect.left() + 24.0, fy + 14.0),
+                            egui::Align2::LEFT_CENTER,
+                            if pl.enabled { "已启用" } else { "已禁用" },
+                            theme::font(11.0),
+                            if pl.enabled { pal.green_t } else { pal.t4 },
+                        );
+
+                        // 右侧两个小按钮：开关 + 卸载
+                        let del_rect = egui::Rect::from_center_size(
+                            egui::pos2(rect.right() - 21.0, fy + 14.0),
+                            egui::vec2(24.0, 20.0),
+                        );
+                        let tog_rect = egui::Rect::from_center_size(
+                            egui::pos2(del_rect.left() - 6.0 - 12.0, fy + 14.0),
+                            egui::vec2(24.0, 20.0),
+                        );
+                        let del = ui.interact(
+                            del_rect,
+                            ui.id().with(("pl-del", pl.id.as_str())),
+                            egui::Sense::click(),
+                        );
+                        let tog = ui.interact(
+                            tog_rect,
+                            ui.id().with(("pl-tog", pl.id.as_str())),
+                            egui::Sense::click(),
+                        );
+                        if del.hovered() {
+                            theme::round_rect(ui, del_rect, 4, pal.danger_bg, None);
+                        }
+                        let confirming = self.plugin_confirm.as_deref() == Some(pl.id.as_str());
+                        ui.painter().text(
+                            del_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            if confirming { "确认" } else { "✕" },
+                            theme::font(if confirming { 11.0 } else { 10.0 }),
+                            if confirming || del.hovered() { pal.red } else { pal.t4 },
+                        );
+                        // 开关小图标
+                        let sw = egui::Rect::from_center_size(tog_rect.center(), egui::vec2(20.0, 12.0));
+                        theme::round_rect(
+                            ui,
+                            sw,
+                            6,
+                            if pl.enabled { pal.green } else { pal.line3 },
+                            None,
+                        );
+                        let kx = if pl.enabled { sw.right() - 5.0 } else { sw.left() + 5.0 };
+                        ui.painter()
+                            .circle_filled(egui::pos2(kx, sw.center().y), 4.0, Color32::WHITE);
+
+                        if tog.clicked() {
+                            toggle = Some((pl.id.clone(), !pl.enabled));
+                        }
+                        if del.clicked() {
+                            uninstall = Some(pl.id.clone());
+                        }
+                        ui.add_space(10.0);
                     }
                 });
+                ui.add_space(10.0);
             }
-        });
-        if let Some((id, on)) = toggle {
-            match service::toggle_plugin(&id, on) {
-                Ok(()) => self.status = "已更新".into(),
+
+            if let Some((id, on)) = toggle {
+                match service::toggle_plugin(&id, on) {
+                    Ok(()) => self.status = "已更新".into(),
+                    Err(e) => self.status = e,
+                }
+            }
+            if let Some(id) = uninstall {
+                // 第一次点击进入确认态，4 秒后自动复位
+                if self.plugin_confirm.as_deref() == Some(id.as_str()) {
+                    self.plugin_confirm = None;
+                    match service::uninstall_plugin(&id) {
+                        Ok(()) => self.status = "已卸载".into(),
+                        Err(e) => self.status = e,
+                    }
+                } else {
+                    self.plugin_confirm = Some(id);
+                    self.plugin_confirm_at = ui.input(|i| i.time);
+                }
+            }
+        }
+
+        if do_install {
+            let id = self.plugin_input.trim().to_string();
+            match service::install_plugin(&id) {
+                Ok(()) => {
+                    self.plugin_input.clear();
+                    self.status = "已安装".into();
+                }
                 Err(e) => self.status = e,
+            }
+        }
+
+        // 确认态 4 秒超时复位
+        if let (Some(_), at) = (&self.plugin_confirm, self.plugin_confirm_at) {
+            if ui.input(|i| i.time) - at > 4.0 {
+                self.plugin_confirm = None;
             }
         }
     }

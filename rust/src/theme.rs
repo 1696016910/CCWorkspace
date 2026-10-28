@@ -245,3 +245,38 @@ pub fn hline(ui: &mut egui::Ui, pal: &Pal) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 1.0), egui::Sense::hover());
     ui.painter().hline(rect.x_range(), rect.center().y, hairline(pal));
 }
+
+/// 无 Ui 上下文时的省略文本布局（给 painter 直绘用）。
+pub fn ellipsis_ctx(
+    ctx: &egui::Context,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    max_w: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::single_section(
+        text.to_owned(),
+        egui::TextFormat { font_id: font, color, ..Default::default() },
+    );
+    job.wrap.max_width = max_w;
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = false;
+    job.wrap.overflow_character = Some('…');
+    ctx.fonts(|f| f.layout_job(job))
+}
+
+/// 只有 Painter 时的圆角矩形（弹窗直绘用）。
+pub fn round_rect_p(
+    p: &egui::Painter,
+    rect: egui::Rect,
+    radius: u8,
+    fill: Color32,
+    stroke: Option<Stroke>,
+) {
+    if fill != Color32::TRANSPARENT {
+        p.rect_filled(rect, Rounding::same(radius as f32), fill);
+    }
+    if let Some(s) = stroke {
+        p.rect_stroke(rect, Rounding::same(radius as f32), s);
+    }
+}

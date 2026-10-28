@@ -892,6 +892,8 @@ pub struct Plugin {
     pub id: String,
     pub name: String,
     pub version: String,
+    /// 插件仓库名，取自 id 里 @ 之后的部分
+    pub marketplace: String,
     pub enabled: bool,
 }
 
@@ -907,11 +909,13 @@ pub fn list_plugins() -> Vec<Plugin> {
         .filter_map(|v| {
             let id = v.get("id")?.as_str()?.to_string();
             let name = id.split('@').next().unwrap_or(&id).to_string();
+            let marketplace = id.split('@').nth(1).unwrap_or("unknown").to_string();
             Some(Plugin {
                 version: v.get("version").and_then(|x| x.as_str()).unwrap_or("").to_string(),
                 enabled: v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(false),
                 id,
                 name,
+                marketplace,
             })
         })
         .collect()
@@ -952,4 +956,20 @@ fn string_list(v: Option<&serde_json::Value>) -> Vec<String> {
     v.and_then(|x| x.as_array())
         .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
         .unwrap_or_default()
+}
+
+/// 安装插件：`claude plugin install <id>`。
+pub fn install_plugin(id: &str) -> Result<(), String> {
+    if id.trim().is_empty() {
+        return Err("插件 ID 不能为空".into());
+    }
+    run_claude(&["plugin", "install", id]).map(|_| ())
+}
+
+/// 卸载插件：`claude plugin uninstall <id>`。
+pub fn uninstall_plugin(id: &str) -> Result<(), String> {
+    if id.trim().is_empty() {
+        return Err("插件 ID 不能为空".into());
+    }
+    run_claude(&["plugin", "uninstall", id]).map(|_| ())
 }

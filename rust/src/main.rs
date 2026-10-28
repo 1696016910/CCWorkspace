@@ -8,6 +8,7 @@ mod db;
 mod model;
 mod icons;
 mod markdown;
+mod pick;
 mod service;
 mod settings;
 mod theme;
@@ -166,6 +167,16 @@ struct App {
     pending_confirm: Option<Confirm>,
     renaming: Option<(String, String, bool)>,       // (id, 当前名称, 是工作区)
 
+    // 对话区浮层状态
+    thread_rect: egui::Rect,
+    away_from_bottom: bool,
+    scroll_offset: f32,
+    content_h: f32,
+    list_h: f32,
+    sticky_question: Option<(String, String)>,
+    scroll_to_message: Option<String>,
+    scroll_to_bottom_request: bool,
+
     // 右键/更多菜单的目标
     menu_target: Option<(String, String, bool, bool)>,
 
@@ -178,6 +189,8 @@ struct App {
     show_trash: bool,
     trash: Vec<SessionSummary>,
     preview: Option<(String, String)>, // (标题, 内容)
+    preview_mode: u8,                  // 0=预览 1=源码
+    preview_scroll: f32,
 
     // 设置页
     show_settings: bool,
@@ -188,6 +201,9 @@ struct App {
     perm_allow: String,
     perm_deny: String,
     model_fields: Vec<(String, String, String)>, // (key, label, value)
+    plugin_input: String,
+    plugin_confirm: Option<String>,
+    plugin_confirm_at: f64,
     mkt_name: String,
     mkt_repo: String,
 }
@@ -211,6 +227,14 @@ impl App {
             new_ws_name: String::new(),
             pending_confirm: None,
             renaming: None,
+            thread_rect: egui::Rect::NOTHING,
+            away_from_bottom: false,
+            scroll_offset: 0.0,
+            content_h: 0.0,
+            list_h: 0.0,
+            sticky_question: None,
+            scroll_to_message: None,
+            scroll_to_bottom_request: false,
             menu_target: None,
             dark: false,
             trash_count: 0,
@@ -218,6 +242,8 @@ impl App {
             show_trash: false,
             trash: vec![],
             preview: None,
+            preview_mode: 0,
+            preview_scroll: 0.0,
             show_settings: false,
             settings_tab: 0,
             env_rows: vec![],
@@ -225,6 +251,9 @@ impl App {
             perm_allow: String::new(),
             perm_deny: String::new(),
             model_fields: vec![],
+            plugin_input: String::new(),
+            plugin_confirm: None,
+            plugin_confirm_at: 0.0,
             mkt_name: String::new(),
             mkt_repo: String::new(),
         };
@@ -468,48 +497,218 @@ impl App {
     /// 必须在 CentralPanel 之后调用：egui 按调用顺序绘制，
     /// 提前画的 Window 会被主区盖住，点开按钮什么也看不到。
     /// 只展示已落库的快照，不额外跑一次 /context，那会再花一轮 tokens。
+    /// 上下文用量弹层，复刻 ContextPopover.vue。
+    ///
+    /// 380px 卡片、底部对齐（padding-bottom 110px）、
+    /// 24px 大字百分比 + 10px 进度条 + 分类明细 + 剩余空间 +
+    /// 说明块 + 全宽「压缩上下文」按钮。
     fn render_context_panel(&mut self, ctx: &egui::Context) {
         if !self.show_context {
             return;
         }
-        let info = self
+        let pal = self.pal();
+        let pointer = ctx.input(|i| i.pointer.interact_pos());
+        let hot = |r: egui::Rect| pointer.map(|q| r.contains(q)).unwrap_or(false);
+
+        let screen = ctx.screen_rect();
+        let p = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("ctx-popover"),
+        ));
+        // 遮罩 rgba(0,0,0,.16)
+        p.rect_filled(
+            screen,
+            egui::Rounding::ZERO,
+            Color32::from_rgba_unmultiplied(0, 0, 0, 41),
+        );
+
+        let ses = self
             .current_ses
             .as_ref()
             .and_then(|id| self.sessions.iter().find(|s| &s.id == id))
-            .map(|s| (s.context_percent, s.context_tokens));
+            .cloned();
+        let pct = ses.as_ref().map(|s| s.context_percent).unwrap_or(0.0);
+        let tokens = ses.as_ref().map(|s| s.context_tokens).unwrap_or(0);
+        // 分母取 200k（Claude 的上下文窗口），与 CLI 报的一致
+        let max_tokens = 200_000.0_f32;
 
-        let mut open = true;
-        egui::Window::new("上下文使用情况")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-24.0, -160.0))
-            .default_width(300.0)
-            .show(ctx, |ui| {
-                match info {
-                    Some((pct, tokens)) => {
-                        ui.add(
-                            // 不能用 INFINITY：浮动 Window 里会算出无效尺寸，
-                            // 整块面板直接不渲染。
-                            egui::ProgressBar::new((pct / 100.0) as f32)
-                                .desired_width(240.0)
-                                .text(format!("{pct:.1}%")),
-                        );
-                        ui.add_space(8.0);
-                        ui.label(format!("已用 {}", human_tokens(tokens)));
-                        ui.add_space(8.0);
-                        ui.label(
-                            egui::RichText::new("每轮对话结束后由 CLI 的用量事件更新。")
-                                .small()
-                                .weak(),
-                        );
-                    }
-                    None => {
-                        ui.label("请先选择一个会话。");
-                    }
-                }
-            });
-        if !open {
+        let w = 380.0_f32.min(screen.width() - 32.0);
+        let h = 340.0;
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(screen.center().x - w / 2.0, screen.bottom() - 110.0 - h),
+            egui::vec2(w, h),
+        );
+        p.rect_filled(
+            rect.translate(egui::vec2(0.0, 16.0)),
+            egui::Rounding::same(10.0),
+            Color32::from_rgba_unmultiplied(0, 0, 0, 41),
+        );
+        p.rect_filled(rect, egui::Rounding::same(10.0), pal.surface);
+        p.rect_stroke(rect, egui::Rounding::same(10.0), Stroke::new(1.0_f32, pal.line2));
+
+        // 内边距 14px 16px 16px
+        let mut y = rect.top() + 14.0;
+
+        // 标题行
+        p.text(
+            egui::pos2(rect.left() + 16.0, y),
+            egui::Align2::LEFT_TOP,
+            "上下文使用情况",
+            theme::font_bold(13.0),
+            pal.t1,
+        );
+        let x_btn = egui::Rect::from_min_size(
+            egui::pos2(rect.right() - 16.0 - 22.0, y - 4.0),
+            egui::vec2(22.0, 22.0),
+        );
+        if hot(x_btn) {
+            theme::round_rect_p(&p, x_btn, 4, pal.bg_hover, None);
+        }
+        icons::close(
+            &p,
+            egui::Rect::from_center_size(x_btn.center(), egui::vec2(10.0, 10.0)),
+            if hot(x_btn) { pal.t1 } else { pal.t3 },
+        );
+        y += 26.0;
+
+        // 大字百分比 24px 600 + tokens
+        let pct_str = if pct > 0.0 && pct < 1.0 {
+            format!("{pct:.1}")
+        } else {
+            format!("{}", pct.round() as i64)
+        };
+        p.text(
+            egui::pos2(rect.left() + 16.0, y),
+            egui::Align2::LEFT_TOP,
+            format!("{pct_str}%"),
+            theme::font_bold(24.0),
+            pal.t1,
+        );
+        p.text(
+            egui::pos2(rect.left() + 16.0 + pct_str.len() as f32 * 14.0 + 18.0, y + 12.0),
+            egui::Align2::LEFT_TOP,
+            format!("{} / {} tokens", human_tokens(tokens as i64), human_tokens(max_tokens as i64)),
+            theme::mono(11.5),
+            pal.t3,
+        );
+        y += 34.0;
+
+        // 进度条 10px 高 5px 圆角
+        let bar = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + 16.0, y),
+            egui::vec2(w - 32.0, 10.0),
+        );
+        theme::round_rect_p(&p, bar, 5, Color32::from_rgb(0xec, 0xec, 0xee), None);
+        if pct > 0.0 {
+            let fill_w = (bar.width() * (pct as f32 / 100.0)).max(3.0);
+            theme::round_rect_p(
+                &p,
+                egui::Rect::from_min_size(bar.min, egui::vec2(fill_w, 10.0)),
+                4,
+                if pct > 80.0 {
+                    Color32::from_rgb(0xd9, 0x9a, 0x45)
+                } else {
+                    pal.green
+                },
+                None,
+            );
+        }
+        y += 20.0;
+
+        // 模型
+        let model = self
+            .sessions
+            .iter()
+            .find(|s| Some(&s.id) == self.current_ses.as_ref())
+            .map(|_| "claude".to_string())
+            .unwrap_or_else(|| "—".into());
+        p.text(
+            egui::pos2(rect.left() + 16.0, y),
+            egui::Align2::LEFT_TOP,
+            format!("模型：{model}"),
+            theme::font(11.5),
+            pal.t4,
+        );
+        y += 22.0;
+
+        // 分类明细（用已落库的 token 数近似：已用 / 剩余）
+        p.hline(
+            (rect.left() + 16.0)..=(rect.right() - 16.0),
+            y,
+            Stroke::new(1.0_f32, pal.line),
+        );
+        y += 10.0;
+        let used = tokens as f32;
+        let rows = [
+            ("已用上下文", used),
+            ("剩余空间", (max_tokens - used).max(0.0)),
+        ];
+        for (label, val) in rows {
+            p.text(
+                egui::pos2(rect.left() + 16.0, y),
+                egui::Align2::LEFT_TOP,
+                label,
+                theme::font(12.0),
+                pal.t2,
+            );
+            p.text(
+                egui::pos2(rect.right() - 16.0, y),
+                egui::Align2::RIGHT_TOP,
+                human_tokens(val as i64),
+                theme::mono(11.0),
+                pal.t3,
+            );
+            y += 20.0;
+        }
+        y += 8.0;
+
+        // 说明块
+        let notice_text = "压缩会把历史对话摘要成一段更短的上下文，之后仍可继续对话，但细节会丢失。";
+        let ng = ctx.fonts(|f| {
+            f.layout(notice_text.to_owned(), theme::font(11.5), pal.t3, w - 32.0 - 22.0)
+        });
+        let nr = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + 16.0, y),
+            egui::vec2(w - 32.0, ng.size().y + 18.0),
+        );
+        theme::round_rect_p(&p, nr, 7, pal.surface2, Some(Stroke::new(1.0_f32, pal.line)));
+        p.galley(egui::pos2(nr.left() + 11.0, nr.top() + 9.0), ng, pal.t3);
+
+        // 压缩按钮：贴卡片底部
+        let compact_btn = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + 16.0, rect.bottom() - 16.0 - 32.0),
+            egui::vec2(w - 32.0, 32.0),
+        );
+        theme::round_rect_p(
+            &p,
+            compact_btn,
+            7,
+            if hot(compact_btn) { pal.bg_hover } else { pal.surface2 },
+            Some(Stroke::new(1.0_f32, pal.line3)),
+        );
+        p.text(
+            compact_btn.center(),
+            egui::Align2::CENTER_CENTER,
+            "压缩上下文",
+            theme::font(12.5),
+            pal.t1,
+        );
+
+        // 交互
+        if let Some(q) = ctx.input(|i| {
+            if i.pointer.any_click() {
+                i.pointer.interact_pos()
+            } else {
+                None
+            }
+        }) {
+            if x_btn.contains(q) || !rect.contains(q) {
+                self.show_context = false;
+            } else if compact_btn.contains(q) {
+                self.status = "压缩需要在会话内执行 /compact".into();
+            }
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.show_context = false;
         }
     }
@@ -780,27 +979,212 @@ impl App {
         }
     }
 
+    /// 文件预览，复刻 FileViewer.vue。
+    ///
+    /// min(1000px, 100%) × min(760px, 100%)、header bg-bar、
+    /// 类型徽标 + 文件名 + 路径、Markdown 可切「预览/源码」、
+    /// 源码视图带行号（52px 宽 + 右侧 16px 内边距）。
     fn render_preview(&mut self, ctx: &egui::Context) {
         let Some((title, content)) = self.preview.clone() else { return };
-        let mut open = true;
-        egui::Window::new(title)
-            .open(&mut open)
-            .collapsible(false)
-            .default_width(720.0)
-            .default_height(520.0)
-            .show(ctx, |ui| {
-                egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
-                    let mut text = content.as_str();
-                    ui.add(
-                        egui::TextEdit::multiline(&mut text)
-                            .font(egui::TextStyle::Monospace)
-                            .desired_width(f32::INFINITY)
-                            .interactive(false),
-                    );
-                });
-            });
-        if !open {
+        let pal = self.pal();
+        let pointer = ctx.input(|i| i.pointer.interact_pos());
+        let hot = |r: egui::Rect| pointer.map(|q| r.contains(q)).unwrap_or(false);
+
+        let screen = ctx.screen_rect();
+        let p = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("file-viewer"),
+        ));
+        p.rect_filled(
+            screen,
+            egui::Rounding::ZERO,
+            Color32::from_rgba_unmultiplied(0, 0, 0, 89),
+        );
+
+        let w = 1000.0_f32.min(screen.width() - 72.0);
+        let h = 760.0_f32.min(screen.height() - 72.0);
+        let rect = egui::Rect::from_center_size(screen.center(), egui::vec2(w, h));
+        p.rect_filled(
+            rect.translate(egui::vec2(0.0, 24.0)),
+            egui::Rounding::same(10.0),
+            Color32::from_rgba_unmultiplied(0, 0, 0, 90),
+        );
+        p.rect_filled(rect, egui::Rounding::same(10.0), pal.bg);
+        p.rect_stroke(rect, egui::Rounding::same(10.0), Stroke::new(1.0_f32, pal.line2));
+
+        // ── header 10px 12px ──
+        let head_h = 49.0;
+        let head = egui::Rect::from_min_size(rect.min, egui::vec2(w, head_h));
+        p.rect_filled(head, egui::Rounding::ZERO, pal.bg_bar);
+        p.hline(head.x_range(), head.bottom(), Stroke::new(1.0_f32, pal.line));
+
+        // 类型徽标 28x28
+        let badge = egui::Rect::from_min_size(
+            egui::pos2(head.left() + 12.0, head.center().y - 14.0),
+            egui::vec2(28.0, 28.0),
+        );
+        theme::round_rect_p(&p, badge, 6, pal.bg_soft, Some(Stroke::new(1.0_f32, pal.line)));
+        let ext = title
+            .rsplit('.')
+            .next()
+            .filter(|e| e.len() <= 5 && *e != title)
+            .unwrap_or("TXT")
+            .to_uppercase();
+        p.text(
+            badge.center(),
+            egui::Align2::CENTER_CENTER,
+            &ext,
+            theme::mono(9.0),
+            pal.t2,
+        );
+
+        let name = title.rsplit(['\\', '/']).next().unwrap_or(&title).to_string();
+        p.text(
+            egui::pos2(badge.right() + 10.0, head.center().y - 7.0),
+            egui::Align2::LEFT_CENTER,
+            &name,
+            theme::font(12.5),
+            pal.t1,
+        );
+        let path_g = crate::theme::ellipsis_ctx(ctx, &title, theme::mono(10.0), pal.t4, w * 0.45);
+        p.galley(
+            egui::pos2(badge.right() + 10.0, head.center().y + 5.0),
+            path_g,
+            pal.t4,
+        );
+
+        // 右侧：关闭按钮
+        let close_rect = egui::Rect::from_center_size(
+            egui::pos2(head.right() - 24.0, head.center().y),
+            egui::vec2(26.0, 26.0),
+        );
+        if hot(close_rect) {
+            theme::round_rect_p(&p, close_rect, 5, pal.bg_hover, None);
+        }
+        icons::close(
+            &p,
+            egui::Rect::from_center_size(close_rect.center(), egui::vec2(11.0, 11.0)),
+            if hot(close_rect) { pal.t1 } else { pal.t3 },
+        );
+
+        // Markdown 才有预览/源码切换
+        let is_md = matches!(ext.as_str(), "MD" | "MARKDOWN");
+        let mut seg_preview = egui::Rect::NOTHING;
+        let mut seg_code = egui::Rect::NOTHING;
+        if is_md {
+            let seg = egui::Rect::from_min_size(
+                egui::pos2(close_rect.left() - 8.0 - 96.0, head.center().y - 13.0),
+                egui::vec2(96.0, 26.0),
+            );
+            theme::round_rect_p(&p, seg, 6, pal.surface2, Some(Stroke::new(1.0_f32, pal.line)));
+            seg_preview = egui::Rect::from_min_size(
+                egui::pos2(seg.left() + 2.0, seg.top() + 2.0),
+                egui::vec2(45.0, 22.0),
+            );
+            seg_code = egui::Rect::from_min_size(
+                egui::pos2(seg_preview.right() + 2.0, seg.top() + 2.0),
+                egui::vec2(45.0, 22.0),
+            );
+            for (r, label, on) in [
+                (seg_preview, "预览", self.preview_mode == 0),
+                (seg_code, "源码", self.preview_mode == 1),
+            ] {
+                if on {
+                    theme::round_rect_p(&p, r, 4, pal.bg_select, None);
+                }
+                p.text(
+                    r.center(),
+                    egui::Align2::CENTER_CENTER,
+                    label,
+                    theme::font(11.0),
+                    if on { pal.t1 } else { pal.t3 },
+                );
+            }
+        }
+
+        // ── 内容区 ──
+        let body = egui::Rect::from_min_max(
+            egui::pos2(rect.left(), head.bottom()),
+            egui::pos2(rect.right(), rect.bottom() - 1.0),
+        );
+        let lines: Vec<&str> = content.lines().collect();
+        let line_h = 21.0; // 12px * 1.75
+        let show_code = !is_md || self.preview_mode == 1;
+
+        if show_code {
+            let first = ((self.preview_scroll / line_h).floor() as usize).min(lines.len());
+            for (i, line) in lines.iter().enumerate().skip(first) {
+                let y = body.top() + 12.0 + i as f32 * line_h - self.preview_scroll
+                    + first as f32 * line_h;
+                if y > body.bottom() {
+                    break;
+                }
+                if y + line_h < body.top() {
+                    continue;
+                }
+                let row = egui::Rect::from_min_size(
+                    egui::pos2(body.left(), y - 2.0),
+                    egui::vec2(body.width(), line_h),
+                );
+                if hot(row) {
+                    p.rect_filled(row, egui::Rounding::ZERO, Color32::from_black_alpha(6));
+                }
+                // 行号 52px 右对齐 + 16px 内边距
+                p.text(
+                    egui::pos2(body.left() + 52.0 - 16.0, y + line_h / 2.0 - 2.0),
+                    egui::Align2::RIGHT_CENTER,
+                    (i + 1).to_string(),
+                    theme::mono(11.0),
+                    pal.t4,
+                );
+                let g = crate::theme::ellipsis_ctx(
+                    ctx,
+                    line,
+                    theme::mono(12.0),
+                    pal.t1,
+                    body.width() - 80.0,
+                );
+                p.galley(egui::pos2(body.left() + 52.0, y), g, pal.t1);
+            }
+        } else {
+            // Markdown 预览：复用对话区的渲染器
+            let inner_w = 760.0_f32.min(body.width() - 68.0);
+            let left = body.left() + (body.width() - inner_w) / 2.0;
+            let mut child = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("file-md"),
+            ));
+            let _ = &mut child;
+            // 用 painter 直绘到 Foreground 层
+            let top = body.top() + 26.0 - self.preview_scroll;
+            crate::markdown::draw_painter(&p, ctx, &pal, &content, left, top, inner_w);
+        }
+
+        // ── 交互 ──
+        let scroll_delta = ctx.input(|i| i.raw_scroll_delta.y);
+        if hot(body) && scroll_delta != 0.0 {
+            let max = (lines.len() as f32 * line_h + 40.0 - body.height()).max(0.0);
+            self.preview_scroll = (self.preview_scroll - scroll_delta).clamp(0.0, max);
+        }
+        if let Some(q) = ctx.input(|i| {
+            if i.pointer.any_click() {
+                i.pointer.interact_pos()
+            } else {
+                None
+            }
+        }) {
+            if close_rect.contains(q) || !rect.contains(q) {
+                self.preview = None;
+                self.preview_scroll = 0.0;
+            } else if seg_preview.contains(q) {
+                self.preview_mode = 0;
+            } else if seg_code.contains(q) {
+                self.preview_mode = 1;
+            }
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.preview = None;
+            self.preview_scroll = 0.0;
         }
     }
 
@@ -1051,6 +1435,409 @@ impl App {
             }
         } else if dismissed {
             self.pending_confirm = None;
+        }
+    }
+
+    /// 顶部浮动提问 + 回到最新按钮。
+    ///
+    /// 复刻 ChatPane.vue：距底部超过 120px 视为"用户在读历史"，
+    /// 此时顶部钉住当前视口最靠上的用户提问，底部出现「回到最新」。
+    /// 流式生成期间也不自动把人拽回底部。
+    fn render_chat_overlays(&mut self, ctx: &egui::Context, list_rect: egui::Rect) {
+        let pal = self.pal();
+        let pointer = ctx.input(|i| i.pointer.interact_pos());
+        let hot = |r: egui::Rect| pointer.map(|p| r.contains(p)).unwrap_or(false);
+        let clicked = ctx.input(|i| {
+            if i.pointer.any_click() {
+                i.pointer.interact_pos()
+            } else {
+                None
+            }
+        });
+
+        // ── 顶部浮动提问：白色卡片 + 阴影，最多两行 ──
+        if self.away_from_bottom {
+            if let Some((id, text)) = self.sticky_question.clone() {
+                let w = 680.0_f32.min(list_rect.width() - 48.0);
+                let galley = ctx.fonts(|f| {
+                    let mut job = egui::text::LayoutJob::single_section(
+                        text.clone(),
+                        egui::TextFormat {
+                            font_id: theme::font(12.5),
+                            color: pal.t2,
+                            line_height: Some(12.5 * 1.5),
+                            ..Default::default()
+                        },
+                    );
+                    job.wrap.max_width = w - 28.0 - 14.0;
+                    job.wrap.max_rows = 2;
+                    job.wrap.break_anywhere = true;
+                    job.wrap.overflow_character = Some('…');
+                    f.layout_job(job)
+                });
+                let h = galley.size().y + 18.0;
+                // 贴在对话区顶部；线程本身有 26px 顶部留白，这里占 8..8+h 不会压住内容
+                let rect = egui::Rect::from_min_size(
+                    egui::pos2(list_rect.center().x - w / 2.0, list_rect.top() + 6.0),
+                    egui::vec2(w, h),
+                );
+                let p = ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Middle,
+                    egui::Id::new("sticky-q"),
+                ));
+                // 阴影
+                p.rect_filled(
+                    rect.translate(egui::vec2(0.0, 2.0)).expand(1.0),
+                    egui::Rounding::same(10.0),
+                    Color32::from_rgba_unmultiplied(0, 0, 0, 18),
+                );
+                p.rect_filled(
+                    rect,
+                    egui::Rounding::same(10.0),
+                    if hot(rect) { pal.bg_hover } else { pal.surface },
+                );
+                p.rect_stroke(
+                    rect,
+                    egui::Rounding::same(10.0),
+                    egui::Stroke::new(1.0_f32, if hot(rect) { pal.line3 } else { pal.line2 }),
+                );
+                // 绿点
+                p.circle_filled(egui::pos2(rect.left() + 20.0, rect.top() + 9.0 + 3.0), 3.0, pal.green);
+                p.galley(egui::pos2(rect.left() + 28.0, rect.top() + 9.0), galley, pal.t2);
+
+                if clicked.map(|c| rect.contains(c)).unwrap_or(false) {
+                    self.scroll_to_message = Some(id);
+                }
+            }
+        }
+
+        // ── 回到最新：底部居中的胶囊按钮，live 态带绿点 ──
+        if self.away_from_bottom {
+            let live = self.streaming;
+            let label = "回到最新";
+            let w = 96.0;
+            let h = 30.0;
+            let rect = egui::Rect::from_min_size(
+                egui::pos2(
+                    list_rect.center().x - w / 2.0,
+                    list_rect.bottom() - 148.0,
+                ),
+                egui::vec2(w, h),
+            );
+            let p = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Middle,
+                egui::Id::new("jump-latest"),
+            ));
+            p.rect_filled(
+                rect.translate(egui::vec2(0.0, 4.0)).expand(1.0),
+                egui::Rounding::same(15.0),
+                Color32::from_rgba_unmultiplied(0, 0, 0, 26),
+            );
+            let hovered = hot(rect);
+            let bg = if hovered {
+                if live {
+                    pal.green_soft
+                } else {
+                    pal.bg_hover
+                }
+            } else {
+                pal.surface
+            };
+            p.rect_filled(rect, egui::Rounding::same(15.0), bg);
+            p.rect_stroke(
+                rect,
+                egui::Rounding::same(15.0),
+                egui::Stroke::new(
+                    1.0_f32,
+                    if live {
+                        pal.green
+                    } else if hovered {
+                        pal.line3
+                    } else {
+                        pal.line2
+                    },
+                ),
+            );
+            let fg = if live { pal.green } else { pal.t2 };
+            // 左边：live 态是绿点，否则是向下箭头
+            let ix = rect.left() + 14.0;
+            if live {
+                p.circle_filled(egui::pos2(ix + 2.5, rect.center().y), 2.5, pal.green);
+            } else {
+                icons::arrow_down(
+                    &p,
+                    egui::Rect::from_center_size(
+                        egui::pos2(ix + 5.0, rect.center().y),
+                        egui::vec2(14.0, 14.0),
+                    ),
+                    fg,
+                );
+            }
+            p.text(
+                egui::pos2(rect.left() + 28.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                label,
+                theme::font(12.0),
+                fg,
+            );
+            if clicked.map(|c| rect.contains(c)).unwrap_or(false) {
+                self.scroll_to_bottom_request = true;
+                self.away_from_bottom = false;
+            }
+        }
+    }
+
+    /// 新建工作区弹窗，复刻 NewWorkspaceDialog.vue。
+    ///
+    /// 460px、14px 圆角、标题 16px 600、输入框 40px 高 8px 圆角、
+    /// 目录行带「选择」按钮、footer bg-bar。
+    fn render_new_ws_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_new_ws {
+            return;
+        }
+        let pal = self.pal();
+        let screen = ctx.screen_rect();
+        let p = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("new-ws"),
+        ));
+        p.rect_filled(
+            screen,
+            egui::Rounding::ZERO,
+            Color32::from_rgba_unmultiplied(10, 10, 14, 115),
+        );
+
+        let w = 460.0_f32.min(screen.width() - 48.0);
+        let h = 356.0;
+        let rect = egui::Rect::from_center_size(screen.center(), egui::vec2(w, h));
+        p.rect_filled(
+            rect.translate(egui::vec2(0.0, 12.0)),
+            egui::Rounding::same(14.0),
+            Color32::from_rgba_unmultiplied(0, 0, 0, 40),
+        );
+        p.rect_filled(rect, egui::Rounding::same(14.0), pal.surface);
+
+        // 标题区 padding 24px 24px 0
+        p.text(
+            egui::pos2(rect.left() + 24.0, rect.top() + 24.0),
+            egui::Align2::LEFT_TOP,
+            "新建工作区",
+            theme::font_bold(16.0),
+            pal.t1,
+        );
+        p.text(
+            egui::pos2(rect.left() + 24.0, rect.top() + 50.0),
+            egui::Align2::LEFT_TOP,
+            "选择一个项目目录，并给它起个名字",
+            theme::font(12.5),
+            pal.t4,
+        );
+
+        // 项目目录
+        let mut y = rect.top() + 82.0;
+        p.text(
+            egui::pos2(rect.left() + 24.0, y),
+            egui::Align2::LEFT_TOP,
+            "项目目录",
+            theme::font_bold(12.5),
+            pal.t2,
+        );
+        y += 22.0;
+
+        let field_w = w - 48.0;
+        let pick_w = 72.0;
+        let dir_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + 24.0, y),
+            egui::vec2(field_w - pick_w - 8.0, 40.0),
+        );
+        let pick_rect = egui::Rect::from_min_size(
+            egui::pos2(dir_rect.right() + 8.0, y),
+            egui::vec2(pick_w, 40.0),
+        );
+
+        // 只读目录框：bg-soft + 等宽字
+        theme::round_rect_p(&p, dir_rect, 8, pal.bg_soft, Some(egui::Stroke::new(1.0_f32, pal.line2)));
+        let dir_text = if self.new_ws_path.is_empty() {
+            "尚未选择目录".to_string()
+        } else {
+            self.new_ws_path.clone()
+        };
+        let dg = crate::theme::ellipsis_ctx(
+            ctx,
+            &dir_text,
+            theme::mono(12.5),
+            if self.new_ws_path.is_empty() { pal.t4 } else { pal.t2 },
+            dir_rect.width() - 24.0,
+        );
+        p.galley(
+            egui::pos2(dir_rect.left() + 12.0, dir_rect.center().y - dg.size().y / 2.0),
+            dg,
+            pal.t2,
+        );
+
+        // 选择按钮
+        let pointer = ctx.input(|i| i.pointer.interact_pos());
+        let pick_hot = pointer.map(|q| pick_rect.contains(q)).unwrap_or(false);
+        theme::round_rect_p(
+            &p,
+            pick_rect,
+            8,
+            if pick_hot { pal.bg_hover } else { pal.surface },
+            Some(egui::Stroke::new(1.0_f32, if pick_hot { pal.line3 } else { pal.line2 })),
+        );
+        p.text(
+            pick_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "选择",
+            theme::font(13.0),
+            pal.t1,
+        );
+
+        // 提示
+        y += 47.0;
+        p.text(
+            egui::pos2(rect.left() + 24.0, y),
+            egui::Align2::LEFT_TOP,
+            "选好后会自动填入名称，你也可以修改",
+            theme::font(11.5),
+            pal.t4,
+        );
+
+        // 工作区名称
+        y += 27.0;
+        p.text(
+            egui::pos2(rect.left() + 24.0, y),
+            egui::Align2::LEFT_TOP,
+            "工作区名称",
+            theme::font_bold(12.5),
+            pal.t2,
+        );
+        y += 22.0;
+        let name_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + 24.0, y),
+            egui::vec2(field_w, 40.0),
+        );
+        theme::round_rect_p(
+            &p,
+            name_rect,
+            8,
+            pal.surface,
+            Some(egui::Stroke::new(1.0_f32, pal.line2)),
+        );
+
+        // footer
+        let foot = egui::Rect::from_min_max(
+            egui::pos2(rect.left(), rect.bottom() - 68.0),
+            rect.right_bottom(),
+        );
+        p.rect_filled(foot, egui::Rounding::ZERO, pal.bg_bar);
+        p.hline(foot.x_range(), foot.top(), egui::Stroke::new(1.0_f32, pal.line));
+        p.rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(rect.left(), rect.bottom() - 14.0),
+                rect.right_bottom(),
+            ),
+            egui::Rounding { nw: 0.0, ne: 0.0, sw: 14.0, se: 14.0 },
+            pal.bg_bar,
+        );
+
+        let can = !self.new_ws_path.trim().is_empty() && !self.new_ws_name.trim().is_empty();
+        let create_w = 76.0;
+        let create_rect = egui::Rect::from_min_size(
+            egui::pos2(foot.right() - 24.0 - create_w, foot.center().y - 18.0),
+            egui::vec2(create_w, 36.0),
+        );
+        let cancel_rect = egui::Rect::from_min_size(
+            egui::pos2(create_rect.left() - 10.0 - 68.0, foot.center().y - 18.0),
+            egui::vec2(68.0, 36.0),
+        );
+        let hot = |r: egui::Rect| pointer.map(|q| r.contains(q)).unwrap_or(false);
+
+        theme::round_rect_p(
+            &p,
+            cancel_rect,
+            8,
+            if hot(cancel_rect) { pal.bg_hover } else { pal.surface },
+            Some(egui::Stroke::new(1.0_f32, pal.line2)),
+        );
+        p.text(
+            cancel_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "取消",
+            theme::font(13.0),
+            pal.t1,
+        );
+
+        let cbg = if !can {
+            pal.green.gamma_multiply(0.4)
+        } else if hot(create_rect) {
+            pal.green_h
+        } else {
+            pal.green
+        };
+        theme::round_rect_p(&p, create_rect, 8, cbg, None);
+        p.text(
+            create_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "创建",
+            theme::font_bold(13.0),
+            Color32::WHITE,
+        );
+
+        // 输入框（可编辑，放在 Layer 之上用 ui 交互）
+        let mut clicked = false;
+        let mut cancelled = false;
+        let mut created = false;
+        let mut picked = false;
+        if let Some(q) = ctx.input(|i| {
+            if i.pointer.any_click() {
+                i.pointer.interact_pos()
+            } else {
+                None
+            }
+        }) {
+            if pick_rect.contains(q) {
+                picked = true;
+            } else if create_rect.contains(q) && can {
+                created = true;
+            } else if cancel_rect.contains(q) || !rect.contains(q) {
+                cancelled = true;
+            } else if name_rect.contains(q) {
+                clicked = true;
+            }
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            cancelled = true;
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Enter)) && can {
+            created = true;
+        }
+        let _ = clicked;
+
+        if picked {
+            if let Some(dir) = crate::pick::pick_directory() {
+                self.new_ws_path = dir.to_string_lossy().to_string();
+                if self.new_ws_name.trim().is_empty() {
+                    self.new_ws_name = crate::pick::dir_basename(&self.new_ws_path);
+                }
+            }
+        }
+        if created {
+            if let Some(conn) = &self.conn {
+                match service::add_workspace(conn, &self.new_ws_path, &self.new_ws_name) {
+                    Ok(()) => {
+                        self.new_ws_path.clear();
+                        self.new_ws_name.clear();
+                        self.show_new_ws = false;
+                        self.reload();
+                        self.status = "工作区已创建".into();
+                    }
+                    Err(e) => self.status = e,
+                }
+            }
+        }
+        if cancelled {
+            self.show_new_ws = false;
         }
     }
 
@@ -1864,12 +2651,13 @@ impl App {
                     egui::pos2(ui.min_rect().left(), body_top),
                     egui::pos2(ui.max_rect().right(), ui.max_rect().bottom()),
                 );
+                self.thread_rect = list_rect;
                 let mut preview: Option<String> = None;
                 ui.scope_builder(egui::UiBuilder::new().max_rect(list_rect), |ui| {
-                    egui::ScrollArea::vertical()
+                    let sa = egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
-                        .stick_to_bottom(true)
-                        .show(ui, |ui| {
+                        .stick_to_bottom(!self.away_from_bottom);
+                    let out = sa.show(ui, |ui| {
                             ui.add_space(26.0);
                             let msgs = self.messages.clone();
                             let has_stream = msgs
@@ -1889,7 +2677,42 @@ impl App {
                             }
                             ui.add_space(32.0);
                         });
+
+                    // away_from_bottom：距底部超过 120px 视为在读历史
+                    let dist =
+                        out.content_size.y - out.inner_rect.height() - out.state.offset.y;
+                    self.away_from_bottom = dist > 120.0;
+                    self.scroll_offset = out.state.offset.y;
+                    self.content_h = out.content_size.y;
+                    self.list_h = out.inner_rect.height();
                 });
+
+            // 滚动到底部请求
+            if self.scroll_to_bottom_request {
+                self.scroll_to_bottom_request = false;
+                self.away_from_bottom = false;
+            }
+            // sticky 提问：按滚动比例估算当前视口里最靠上的用户消息
+            self.sticky_question = if self.away_from_bottom {
+                let users: Vec<(String, String)> = self
+                    .messages
+                    .iter()
+                    .filter(|m| m.role == "user")
+                    .map(|m| (m.id.clone(), m.text.clone()))
+                    .collect();
+                if users.is_empty() {
+                    None
+                } else {
+                    // 用滚动进度近似定位：offset 越大说明越靠后
+                    let total = (self.content_h - self.list_h).max(1.0);
+                    let frac = (self.scroll_offset / total).clamp(0.0, 1.0);
+                    let idx = ((frac * users.len() as f32).floor() as usize)
+                        .min(users.len() - 1);
+                    Some(users[idx].clone())
+                }
+            } else {
+                None
+            };
                 ui.allocate_rect(list_rect, egui::Sense::hover());
                 if let Some(p) = preview {
                     self.open_file(p);
@@ -1988,6 +2811,8 @@ impl eframe::App for App {
         self.render_composer(ctx);
         self.render_thread(ctx);
 
+        self.render_chat_overlays(ctx, self.thread_rect);
+        self.render_new_ws_dialog(ctx);
         self.render_row_menu(ctx);
         self.render_context_panel(ctx);
         self.render_trash(ctx);

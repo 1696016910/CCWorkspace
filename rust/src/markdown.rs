@@ -35,7 +35,7 @@ struct TableRow {
 enum Block {
     Heading(usize, Vec<Span>),
     Para(Vec<Span>),
-    Code(String),
+    Code(String, String),
     Bullet(Vec<Span>),
     Numbered(usize, Vec<Span>),
     Quote(Vec<Span>),
@@ -49,6 +49,7 @@ fn parse(src: &str) -> Vec<Block> {
     let mut out: Vec<Block> = Vec::new();
     let mut buf: Vec<String> = Vec::new();
     let mut code: Option<String> = None;
+    let mut code_lang = String::new();
 
     let lines: Vec<&str> = src.lines().collect();
     let mut i = 0;
@@ -58,7 +59,9 @@ fn parse(src: &str) -> Vec<Block> {
         // 围栏代码块
         if let Some(src_buf) = &mut code {
             if line.trim_start().starts_with("```") {
-                out.push(Block::Code(std::mem::take(src_buf)));
+                let body = std::mem::take(src_buf);
+                let lang = std::mem::take(&mut code_lang);
+                out.push(Block::Code(body, lang));
                 code = None;
             } else {
                 src_buf.push_str(line);
@@ -70,6 +73,7 @@ fn parse(src: &str) -> Vec<Block> {
         if line.trim_start().starts_with("```") {
             flush_para(&mut buf, &mut out);
             code = Some(String::new());
+            code_lang = line.trim_start()[3..].trim().to_string();
             i += 1;
             continue;
         }
@@ -112,8 +116,8 @@ fn parse(src: &str) -> Vec<Block> {
         i += 1;
     }
     // 未闭合的代码块也要显示，否则内容凭空消失
-    if let Some(s) = code {
-        out.push(Block::Code(s));
+    if let Some(body) = code {
+        out.push(Block::Code(body, code_lang));
     }
     flush_para(&mut buf, &mut out);
     out
@@ -393,7 +397,8 @@ pub fn draw(ui: &mut egui::Ui, pal: &Pal, text: &str, left: f32, top: f32, width
                     .hline(left..=(left + width), y, Stroke::new(1.0_f32, pal.line));
                 y += 16.0;
             }
-            Block::Code(src) => {
+            Block::Code(src, lang) => {
+                // .code-block：8px 圆角边框，头部 6px 10px 带语言标签与复制按钮
                 // pre：bg-soft + 1px line + 8px 圆角 + padding 12px 14px
                 let body = src.trim_end();
                 let mut j = LayoutJob::default();
@@ -409,12 +414,37 @@ pub fn draw(ui: &mut egui::Ui, pal: &Pal, text: &str, left: f32, top: f32, width
                     },
                 );
                 let galley = ui.fonts(|f| f.layout_job(j));
-                let box_h = galley.size().y + 24.0;
+                let head_h = if lang.is_empty() { 0.0 } else { 29.0 };
+                let box_h = galley.size().y + 24.0 + head_h;
                 let rect = Rect::from_min_size(Pos2::new(left, y), egui::vec2(width, box_h));
-                ui.painter().rect_filled(rect, Rounding::same(8.0), pal.bg_soft);
-                ui.painter()
-                    .rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.0_f32, pal.line));
-                ui.painter().galley(Pos2::new(left + 14.0, y + 12.0), galley, pal.t1);
+                let p = ui.painter();
+                p.rect_filled(rect, Rounding::same(8.0), pal.bg_soft);
+                p.rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.0_f32, pal.line));
+                if head_h > 0.0 {
+                    let head = Rect::from_min_size(rect.min, egui::vec2(width, head_h));
+                    p.rect_filled(
+                        Rect::from_min_max(head.min, Pos2::new(head.right(), head.bottom() - 1.0)),
+                        Rounding { nw: 8.0, ne: 8.0, sw: 0.0, se: 0.0 },
+                        pal.surface2,
+                    );
+                    p.hline(head.x_range(), head.bottom(), Stroke::new(1.0_f32, pal.line));
+                    p.text(
+                        Pos2::new(rect.left() + 10.0, head.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        lang.to_uppercase(),
+                        theme::mono(10.0),
+                        pal.t4,
+                    );
+                    let bw = 44.0;
+                    let btn = Rect::from_min_size(
+                        Pos2::new(rect.right() - 10.0 - bw, head.center().y - 10.0),
+                        egui::vec2(bw, 20.0),
+                    );
+                    p.rect_filled(btn, Rounding::same(4.0), pal.surface);
+                    p.rect_stroke(btn, Rounding::same(4.0), Stroke::new(1.0_f32, pal.line2));
+                    p.text(btn.center(), egui::Align2::CENTER_CENTER, "复制", theme::font(10.5), pal.t3);
+                }
+                ui.painter().galley(Pos2::new(left + 14.0, y + head_h + 12.0), galley, pal.t1);
                 y += box_h + 12.0;
             }
             Block::Table(rows) => {
@@ -490,14 +520,14 @@ mod tests {
     fn splits_code_fence() {
         let blocks = parse("前\n```\nlet x = 1;\n```\n后");
         assert_eq!(blocks.len(), 3);
-        assert!(matches!(&blocks[1], Block::Code(s) if s.contains("let x = 1;")));
+        assert!(matches!(&blocks[1], Block::Code(s, _) if s.contains("let x = 1;")));
     }
 
     #[test]
     fn unclosed_fence_still_renders() {
         let blocks = parse("```\nlet x = 1;");
         assert!(
-            blocks.iter().any(|b| matches!(b, Block::Code(s) if s.contains("let x"))),
+            blocks.iter().any(|b| matches!(b, Block::Code(s, _) if s.contains("let x"))),
             "未闭合的代码块不能丢内容"
         );
     }
@@ -591,4 +621,197 @@ mod tests {
         let blocks = parse("---");
         assert!(matches!(&blocks[0], Block::Rule));
     }
+}
+
+/// 无 Ui 上下文的绘制入口（文件预览用 painter 直绘）。
+///
+/// 与 draw() 逻辑一致，只是拿不到 Ui 时用 ctx.fonts 排版、painter 落笔。
+pub fn draw_painter(
+    p: &egui::Painter,
+    ctx: &egui::Context,
+    pal: &Pal,
+    text: &str,
+    left: f32,
+    top: f32,
+    width: f32,
+) -> f32 {
+    let blocks = parse(text);
+    let mut y = top;
+    let lay = |spans: &[Span], size: f32, lh: f32, w: f32| -> std::sync::Arc<egui::Galley> {
+        let j = job(spans, pal, w, size, lh);
+        ctx.fonts(|f| f.layout_job(j))
+    };
+
+    for b in blocks {
+        match b {
+            Block::Heading(level, spans) => {
+                let size = match level {
+                    1 => 22.0,
+                    2 => 16.0,
+                    3 => 14.5,
+                    _ => 13.5,
+                };
+                let mut sp = spans;
+                for s in &mut sp {
+                    s.bold = true;
+                }
+                y += if level == 1 { 0.0 } else { 26.0 };
+                let g = lay(&sp, size, size * 1.4, width);
+                let h = g.size().y;
+                p.galley(Pos2::new(left, y), g, pal.t1);
+                y += h;
+                // h2 有下边框
+                if level == 2 {
+                    y += 6.0;
+                    p.hline(left..=(left + width), y, Stroke::new(1.0_f32, pal.line));
+                }
+                y += if level == 1 { 16.0 } else { 10.0 };
+            }
+            Block::Para(spans) => {
+                let g = lay(&spans, theme::F_AI, 23.0, width);
+                let h = g.size().y;
+                p.galley(Pos2::new(left, y), g, pal.t1);
+                y += h + 12.0;
+            }
+            Block::Bullet(spans) => {
+                p.circle_filled(Pos2::new(left + 7.0, y + 11.0), 2.2, pal.t2);
+                let g = lay(&spans, theme::F_AI, 23.0, width - 22.0);
+                let h = g.size().y;
+                p.galley(Pos2::new(left + 22.0, y), g, pal.t1);
+                y += h + 4.0;
+            }
+            Block::Numbered(n, spans) => {
+                p.text(
+                    Pos2::new(left + 3.0, y + 3.0),
+                    egui::Align2::LEFT_TOP,
+                    format!("{n}."),
+                    theme::font(theme::F_AI),
+                    pal.t2,
+                );
+                let g = lay(&spans, theme::F_AI, 23.0, width - 22.0);
+                let h = g.size().y;
+                p.galley(Pos2::new(left + 22.0, y), g, pal.t1);
+                y += h + 4.0;
+            }
+            Block::Quote(spans) => {
+                let start = y;
+                y += 2.0;
+                let g = lay(&spans, theme::F_AI, 23.0, width - 14.0);
+                let h = g.size().y;
+                p.galley(Pos2::new(left + 14.0, y), g, pal.t1);
+                y += h + 2.0;
+                p.rect_filled(
+                    Rect::from_min_max(Pos2::new(left, start), Pos2::new(left + 3.0, y)),
+                    Rounding::ZERO,
+                    pal.line3,
+                );
+                y += 12.0;
+            }
+            Block::Rule => {
+                y += 16.0;
+                p.hline(left..=(left + width), y, Stroke::new(1.0_f32, pal.line));
+                y += 16.0;
+            }
+            Block::Code(src, lang) => {
+                let body = src.trim_end();
+                let mut j = LayoutJob::default();
+                j.wrap.max_width = width - 28.0;
+                j.append(
+                    body,
+                    0.0,
+                    TextFormat {
+                        font_id: theme::mono(theme::F_CODE),
+                        color: pal.t1,
+                        line_height: Some(theme::F_CODE * 1.7),
+                        ..Default::default()
+                    },
+                );
+                let g = ctx.fonts(|f| f.layout_job(j));
+                let head_h = if lang.is_empty() { 0.0 } else { 29.0 };
+                let box_h = g.size().y + 24.0 + head_h;
+                let rect = Rect::from_min_size(Pos2::new(left, y), egui::vec2(width, box_h));
+                p.rect_filled(rect, Rounding::same(8.0), pal.bg_soft);
+                p.rect_stroke(rect, Rounding::same(8.0), Stroke::new(1.0_f32, pal.line));
+                if head_h > 0.0 {
+                    // 头部：surface-2 底 + 底边分隔线 + 语言标签 + 复制按钮
+                    let head = Rect::from_min_size(rect.min, egui::vec2(width, head_h));
+                    p.rect_filled(
+                        Rect::from_min_max(
+                            head.min,
+                            Pos2::new(head.right(), head.bottom() - 1.0),
+                        ),
+                        Rounding { nw: 8.0, ne: 8.0, sw: 0.0, se: 0.0 },
+                        pal.surface2,
+                    );
+                    p.hline(head.x_range(), head.bottom(), Stroke::new(1.0_f32, pal.line));
+                    p.text(
+                        Pos2::new(rect.left() + 10.0, head.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        lang.to_uppercase(),
+                        theme::mono(10.0),
+                        pal.t4,
+                    );
+                    // 复制按钮 20px 高
+                    let bw = 44.0;
+                    let btn = Rect::from_min_size(
+                        Pos2::new(rect.right() - 10.0 - bw, head.center().y - 10.0),
+                        egui::vec2(bw, 20.0),
+                    );
+                    p.rect_filled(btn, Rounding::same(4.0), pal.surface);
+                    p.rect_stroke(btn, Rounding::same(4.0), Stroke::new(1.0_f32, pal.line2));
+                    p.text(
+                        btn.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "复制",
+                        theme::font(10.5),
+                        pal.t3,
+                    );
+                }
+                p.galley(Pos2::new(left + 14.0, y + head_h + 12.0), g, pal.t1);
+                y += box_h + 12.0;
+            }
+            Block::Table(rows) => {
+                let cols = rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
+                if cols > 0 {
+                    let col_w = width / cols as f32;
+                    for row in &rows {
+                        let mut galleys = Vec::new();
+                        let mut row_h: f32 = 0.0;
+                        for ci in 0..cols {
+                            let empty = Vec::new();
+                            let spans = row.cells.get(ci).unwrap_or(&empty);
+                            let mut sp = spans.clone();
+                            if row.header {
+                                for s in &mut sp {
+                                    s.bold = true;
+                                }
+                            }
+                            let g = lay(&sp, 12.5, 19.0, col_w - 20.0);
+                            row_h = row_h.max(g.size().y);
+                            galleys.push(g);
+                        }
+                        let rh = row_h + 12.0;
+                        for ci in 0..cols {
+                            let cell = Rect::from_min_size(
+                                Pos2::new(left + col_w * ci as f32, y),
+                                egui::vec2(col_w, rh),
+                            );
+                            if row.header {
+                                p.rect_filled(cell, Rounding::ZERO, pal.bg_soft);
+                            }
+                            p.rect_stroke(cell, Rounding::ZERO, Stroke::new(1.0_f32, pal.line2));
+                            p.galley(
+                                Pos2::new(cell.left() + 10.0, cell.top() + 6.0),
+                                galleys[ci].clone(),
+                                pal.t1,
+                            );
+                        }
+                        y += rh;
+                    }
+                }
+                y += 12.0;
+            }
+        }
+    }
+    y - top
 }
