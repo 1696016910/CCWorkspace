@@ -18,7 +18,9 @@ temp/
 Thumbs.db
 *.log
 
-# 本地覆盖配置（只忽略根目录下的，否则会误伤 .vscode/settings.json）
+# 编辑器与本地覆盖配置
+.vscode/
+.idea/
 .claude/settings.local.json
 /settings.json
 /settings.local.json
