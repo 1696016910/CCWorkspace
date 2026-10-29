@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>附件展示与文件树设计 · Claude 工作台</title>
+<style>
+:root {
+  --bg: #fff;
+  --bg-bar: #fafafa;
+  --bg-hover: #f0f0f1;
+  --bg-soft: #f5f5f6;
+  --bg-select: #e7e7e9;
+  --surface: #fff;
+  --surface-2: #fcfcfd;
+  --line: #e6e6e8;
+  --line-2: #dcdcde;
+  --line-3: #d0d0d4;
+  --t1: #1f1f23;
+  --t2: #5f5f66;
+  --t3: #62626a;
+  --t4: #6f6f78;
+  --green: #47815c;
+  --green-h: #3f7553;
+  --green-soft: #edf4ef;
+  --green-t: #2f6b49;
+  --red: #c0392b;
+  --blue: #1668c9;
+  --r: 6px;
+  --r-lg: 10px;
+  --font: "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--t1);
+  padding: 40px 32px 80px;
+  line-height: 1.6;
+}
+h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.4px; margin-bottom: 8px; }
+.lead { font-size: 13.5px; color: var(--t3); margin-bottom: 40px; max-width: 620px; }
+section { max-width: 1180px; margin: 0 auto 56px; }
+h2 {
+  font-size: 17px; font-weight: 600; margin-bottom: 6px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--line);
+}
+h2 .num {
+  display: inline-block; width: 24px; height: 24px; line-height: 24px;
+  text-align: center; border-radius: 6px; background: var(--green-soft);
+  color: var(--green-t); font-size: 12px; margin-right: 8px; vertical-align: 2px;
+}
+.sub { font-size: 12.5px; color: var(--t4); margin: 10px 0 20px; }
+.note {
+  font-size: 12px; color: var(--t4); line-height: 1.8; margin-top: 14px;
+  padding-left: 10px; border-left: 2px solid var(--line-2);
+}
+.note b { color: var(--t2); font-weight: 500; }
+.stage {
+  border: 1px solid var(--line-2); border-radius: var(--r-lg);
+  background: var(--surface-2); padding: 26px 30px; margin-bottom: 10px;
+}
+.stage.tight { padding: 18px 22px; }
+.cap { font-size: 11px; color: var(--t4); margin-bottom: 10px; letter-spacing: 0.02em; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 14px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+th { font-size: 11.5px; color: var(--t3); font-weight: 500; background: var(--bg-bar); }
+td code { font-family: var(--mono); font-size: 11.5px; color: var(--blue); }
+
+/* ══════ 1. 输入框工具条 ══════ */
+.composer { border: 1px solid var(--line-2); border-radius: 14px; background: var(--surface); overflow: hidden; }
+.composer textarea {
+  width: 100%; border: none; outline: none; resize: none; padding: 13px 16px 4px;
+  font-size: 13.5px; color: var(--t1); background: transparent; height: 54px;
+}
+.composer textarea::placeholder { color: var(--t4); }
+.cbar { display: flex; align-items: center; gap: 6px; height: 42px; padding: 0 10px; }
+.cbtn {
+  width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center;
+  color: var(--t3); transition: background .13s, color .13s;
+}
+.cbtn:hover { background: var(--bg-hover); color: var(--t1); }
+.cbtn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.sp { flex: 1; }
+.ctx { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; border-radius: 7px; font-size: 11.5px; color: var(--t3); }
+.ctx-bar { width: 64px; height: 4px; border-radius: 2px; background: var(--bg-soft); overflow: hidden; }
+.ctx-bar i { display: block; height: 100%; background: var(--green); border-radius: 2px; }
+.send-btn { width: 30px; height: 30px; border-radius: 8px; background: var(--green); color: #fff; display: grid; place-items: center; }
+.send-btn svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ══════ 2. 已发送消息里的附件 ══════ */
+.chat { display: flex; flex-direction: column; gap: 24px; }
+.u-msg { display: flex; justify-content: flex-end; }
+.u-wrap { max-width: 78%; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.u-bubble {
+  background: var(--bg-soft); border-radius: 14px 14px 4px 14px;
+  padding: 10px 15px; font-size: 13.5px; line-height: 1.6;
+}
+.att-list { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.att {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 11px; border: 1px solid var(--line-2); border-radius: 9px;
+  background: var(--surface); text-align: left; max-width: 340px;
+  transition: border-color .12s, box-shadow .12s;
+}
+.att:hover { border-color: var(--line-3); box-shadow: 0 1px 3px rgba(31,31,35,.06); }
+.att-ico {
+  width: 30px; height: 30px; flex: none; border-radius: 6px;
+  background: var(--bg-soft); display: grid; place-items: center; color: var(--t3);
+}
+.att-ico svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.att-body { min-width: 0; flex: 1; }
+.att-name { font-size: 12.5px; color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-path {
+  font-family: var(--mono); font-size: 11px; color: var(--t4); margin-top: 1px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.att-size { font-size: 11px; color: var(--t4); flex: none; }
+.att-img { width: 46px; height: 46px; flex: none; border-radius: 6px; object-fit: cover; border: 1px solid var(--line); background: #dfe6e2; }
+
+/* ══════ 3. 标题栏图标 ══════ */
+.hd { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); margin-bottom: 12px; }
+.hd-title { font-size: 14px; font-weight: 500; }
+.hd-ws { font-size: 11.5px; color: var(--t4); display: flex; align-items: center; gap: 5px; }
+.hd-ws svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+.mh-btn {
+  width: 28px; height: 28px; border-radius: var(--r); flex: none;
+  display: grid; place-items: center; color: var(--t3);
+  transition: background .12s, color .12s;
+}
+.mh-btn:hover { background: var(--bg-hover); color: var(--t1); }
+.mh-btn svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.ico-row { display: flex; gap: 26px; align-items: center; flex-wrap: wrap; }
+.ico-cell { text-align: center; }
+.ico-cell .box { width: 56px; height: 56px; border: 1px solid var(--line-2); border-radius: 9px; display: grid; place-items: center; margin: 0 auto 8px; background: var(--surface); }
+.ico-cell .box svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--t2); }
+.ico-cell .lbl { font-size: 11px; color: var(--t4); }
+.ico-cell.old .box { border-style: dashed; }
+.ico-cell.old .box svg { color: #c0392b; }
+
+/* ══════ 4. 右侧文件抽屉 ══════ */
+.shell {
+  display: grid; grid-template-columns: 200px minmax(0,1fr) 280px;
+  height: 420px; border: 1px solid var(--line-2); border-radius: var(--r-lg);
+  overflow: hidden; background: var(--surface);
+}
+.shell.closed { grid-template-columns: 200px minmax(0,1fr) 0; }
+.mock-side { background: var(--bg-bar); border-right: 1px solid var(--line); padding: 12px 10px; font-size: 12px; }
+.mock-side .ws { display: flex; align-items: center; gap: 6px; color: var(--t2); font-weight: 500; margin-bottom: 10px; }
+.mock-side .ws svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+.mock-side .s { padding: 6px 8px; border-radius: 6px; color: var(--t3); }
+.mock-side .s.on { background: var(--green-soft); color: var(--green-t); font-weight: 500; }
+.mock-main { display: flex; flex-direction: column; min-width: 0; }
+.mock-head { flex: none; height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+.mock-body { flex: 1; padding: 20px; font-size: 13px; color: var(--t2); overflow: hidden; }
+
+.drawer { border-left: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; overflow: hidden; }
+.dr-head { flex: none; height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); }
+.dr-title { font-size: 12px; font-weight: 500; color: var(--t2); }
+.dr-tools { margin-left: auto; display: flex; gap: 2px; }
+.dr-btn { width: 24px; height: 24px; border-radius: 5px; display: grid; place-items: center; color: var(--t4); }
+.dr-btn:hover { background: var(--bg-hover); color: var(--t1); }
+.dr-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.dr-path { flex: none; padding: 8px 12px; font-family: var(--mono); font-size: 10.5px; color: var(--t4); border-bottom: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dr-tree { flex: 1; overflow-y: auto; padding: 6px 0; }
+.node {
+  display: flex; align-items: center; gap: 6px; height: 26px; padding-right: 10px;
+  font-size: 12.5px; color: var(--t2); cursor: pointer; white-space: nowrap;
+}
+.node:hover { background: var(--bg-hover); }
+.node.on { background: var(--green-soft); color: var(--green-t); }
+.node .tri { width: 12px; height: 12px; flex: none; color: var(--t4); display: grid; place-items: center; }
+.node .tri svg { width: 9px; height: 9px; stroke: currentColor; fill: none; stroke-width: 2; }
+.node .tri.leaf { visibility: hidden; }
+.node .ni { width: 14px; height: 14px; flex: none; }
+.node .ni svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.node .nm { overflow: hidden; text-overflow: ellipsis; }
+.node .sz { margin-left: auto; font-size: 10.5px; color: var(--t4); flex: none; }
+.node.d1 { padding-left: 10px; }
+.node.d2 { padding-left: 26px; }
+.node.d3 { padding-left: 42px; }
+
+/* ══════ 5. 宽度自适应 ══════ */
+.wide { border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
+.wide-bar { height: 26px; background: var(--bg-bar); border-bottom: 1px solid var(--line); display: flex; align-items: center; padding: 0 10px; font-size: 10.5px; color: var(--t4); font-family: var(--mono); justify-content: space-between; }
+.wide-body { height: 88px; display: flex; justify-content: center; padding: 12px 0; }
+.measure {
+  border: 1px dashed var(--green); border-radius: 6px; background: var(--green-soft);
+  display: grid; place-items: center; font-size: 11px; color: var(--green-t); font-family: var(--mono);
+}
+
+@media (max-width: 900px) { .shell { grid-template-columns: 160px minmax(0,1fr) 240px; } }
+</style>
+</head>
+<body>
+
+<h1>附件展示与文件树 · 设计稿</h1>
+<p class="lead">2026-10-29 · 对应手工测试第 1–5 条。数值与配色沿用 <code>20261027-界面原型.html</code> 的令牌。</p>
+
+<!-- ══════════════ 1 ══════════════ -->
+<section>
+  <h2><span class="num">1</span>去掉输入框左侧多余的按钮</h2>
+  <p class="sub">左侧那个时钟图标点开的是和右侧百分比完全相同的弹窗，属于重复入口。</p>
+
+  <div class="stage">
+    <div class="cap">改前</div>
+    <div class="composer">
+      <textarea readonly placeholder="描述你想让它做的事..."></textarea>
+      <div class="cbar">
+        <button class="cbtn" title="多余" style="outline:1px dashed #c0392b; outline-offset:1px;">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5l3 2"/></svg>
+        </button>
+        <button class="cbtn" title="附件">
+          <svg viewBox="0 0 24 24"><path d="M8 12.5l4.5-4.5a2.5 2.5 0 013.5 3.5L9.5 18a4 4 0 01-5.5-5.5l7-7"/></svg>
+        </button>
+        <span class="sp"></span>
+        <button class="ctx"><span class="ctx-bar"><i style="width:7%"></i></span>7%</button>
+        <button class="send-btn"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+      </div>
+    </div>
+
+    <div class="cap" style="margin-top:18px">改后</div>
+    <div class="composer">
+      <textarea readonly placeholder="描述你想让它做的事..."></textarea>
+      <div class="cbar">
+        <button class="cbtn" title="添加图片或文件">
+          <svg viewBox="0 0 24 24"><path d="M8 12.5l4.5-4.5a2.5 2.5 0 013.5 3.5L9.5 18a4 4 0 01-5.5-5.5l7-7"/></svg>
+        </button>
+        <span class="sp"></span>
+        <button class="ctx"><span class="ctx-bar"><i style="width:7%"></i></span>7%</button>
+        <button class="send-btn"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+      </div>
+    </div>
+  </div>
+  <p class="note">
+    <b>为什么删</b>：右侧 <code>▁▁ 7%</code> 已经是同一个弹窗的入口，左侧再放一个时钟图标只增加视觉噪声。<br>
+    <b>改动量</b>：删 1 个 button + 3 行样式。
+  </p>
+</section>
+
+<!-- ══════════════ 2 ══════════════ -->
+<section>
+  <h2><span class="num">2</span>已发送消息里保留附件</h2>
+  <p class="sub">现在附件发出去就彻底消失，事后无从查证这条消息带了什么。改为挂在用户消息下方。</p>
+
+  <div class="stage">
+    <div class="chat">
+      <div class="u-msg">
+        <div class="u-wrap">
+          <div class="u-bubble">看看这个 SQL 和这张截图，说说有什么问题</div>
+          <div class="att-list">
+            <button class="att">
+              <span class="att-ico">
+                <svg viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z"/><path d="M13 3.5v5h5"/></svg>
+              </span>
+              <span class="att-body">
+                <span class="att-name">test.sql</span>
+                <span class="att-path">C:\Users\MasterY\Downloads\ttt\test.sql</span>
+              </span>
+              <span class="att-size">12 KB</span>
+            </button>
+            <button class="att">
+              <span class="att-ico">
+                <svg viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z"/><path d="M13 3.5v5h5"/></svg>
+              </span>
+              <span class="att-body">
+                <span class="att-name">新建文本文档.txt</span>
+                <span class="att-path">C:\Users\...\Desktop\新建文本文档.txt</span>
+              </span>
+              <span class="att-size">158 B</span>
+            </button>
+            <button class="att">
+              <img class="att-img" alt="" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='46' height='46'><rect width='46' height='46' fill='%23c9d6cf'/><circle cx='23' cy='18' r='7' fill='%23eef3f0'/><rect x='8' y='28' width='30' height='12' rx='3' fill='%23eef3f0'/></svg>">
+              <span class="att-body">
+                <span class="att-name">1111.png</span>
+                <span class="att-path">C:\Users\MasterY\Downloads\ttt\1111.png</span>
+              </span>
+              <span class="att-size">47 KB</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <table>
+    <tr><th>元素</th><th>规格</th><th>说明</th></tr>
+    <tr><td>卡片宽度</td><td><code>max 340px</code></td><td>超出时路径中间省略，保留文件名与扩展名</td></tr>
+    <tr><td>图标 / 缩略图</td><td>文件 <code>30×30</code>；图片 <code>46×46</code></td><td>图片用原始比例的方形容器裁切</td></tr>
+    <tr><td>文件名</td><td><code>12.5px / --t1</code></td><td>单行，尾部省略</td></tr>
+    <tr><td>路径</td><td><code>11px / --mono / --t4</code></td><td>单行省略；悬停显示完整路径</td></tr>
+    <tr><td>大小</td><td><code>11px / --t4</code></td><td>KB / MB 自动换算</td></tr>
+    <tr><td>点击</td><td>文件 → 内容弹窗；图片 → 大图</td><td>复用现有 <code>FileViewer</code></td></tr>
+  </table>
+
+  <p class="note">
+    <b>路径省略规则</b>：<code>C:\Users\MasterY\Downloads\ttt\sub\test.sql</code> → <code>C:\Users\...\sub\test.sql</code><br>
+    保留首段（盘符或根）与末段（含文件名）；中间用 <code>...</code> 折叠。<br>
+    <b>数据来源</b>：<code>messages</code> 表新增 <code>attachments TEXT</code> 存 JSON 元数据。<br>
+    <b>不存 base64</b>：图片只存路径与大小，缩略图按路径重读。粘贴的截图无路径，只显示文件名与大小。
+  </p>
+</section>
+
+<!-- ══════════════ 3 ══════════════ -->
+<section>
+  <h2><span class="num">3</span>换掉「在资源管理器中打开」的图标</h2>
+  <p class="sub">原来是「文件夹 + 小箭头」两个图形叠在 15px 里，糊成一团，看不出是「打开外部」。</p>
+
+  <div class="stage">
+    <div class="ico-row">
+      <div class="ico-cell old">
+        <div class="box">
+          <svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/><path d="M13 12.5l3 3M16 12.5v3h-3"/></svg>
+        </div>
+        <div class="lbl">改前 · 难辨认</div>
+      </div>
+      <div class="ico-cell">
+        <div class="box">
+          <svg viewBox="0 0 24 24"><path d="M14.5 4.5h5v5"/><path d="M19.5 4.5L11 13"/><path d="M17.5 13.5v5a1.5 1.5 0 01-1.5 1.5H5.5A1.5 1.5 0 014 18.5V8a1.5 1.5 0 011.5-1.5H10"/></svg>
+        </div>
+        <div class="lbl">改后 · 外跳箭头</div>
+      </div>
+    </div>
+
+    <div class="cap" style="margin-top:22px">放进标题栏的实际效果</div>
+    <div class="hd">
+      <span class="hd-title">111</span>
+      <span class="hd-ws">
+        <svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/></svg>
+        测试ttt
+      </span>
+      <span class="sp"></span>
+      <button class="mh-btn" title="在资源管理器中打开工作区">
+        <svg viewBox="0 0 24 24"><path d="M14.5 4.5h5v5"/><path d="M19.5 4.5L11 13"/><path d="M17.5 13.5v5a1.5 1.5 0 01-1.5 1.5H5.5A1.5 1.5 0 014 18.5V8a1.5 1.5 0 011.5-1.5H10"/></svg>
+      </button>
+      <button class="mh-btn" title="复制会话">
+        <svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M15 5.5H6A1.5 1.5 0 004.5 7v9"/></svg>
+      </button>
+      <button class="mh-btn" title="删除会话">
+        <svg viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4.5h5v2M6.5 6.5l1 13h9l1-13"/><path d="M10.5 10v6M13.5 10v6"/></svg>
+      </button>
+    </div>
+  </div>
+  <p class="note">
+    <b>为什么选它</b>：外跳箭头是「打开到外部」的通用符号，单一路径在 15px 下也清晰；
+    和旁边的复制、删除图标在视觉重量上一致。
+  </p>
+</section>
+
+<!-- ══════════════ 4 ══════════════ -->
+<section>
+  <h2><span class="num">4</span>工作区文件树 · 右侧抽屉（方案 B）</h2>
+  <p class="sub">点标题栏的文件按钮从右侧滑出，宽 280px。不打断对话，可随时收起。</p>
+
+  <div class="stage">
+    <div class="cap">抽屉打开</div>
+    <div class="shell">
+      <div class="mock-side">
+        <div class="ws">
+          <svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/></svg>
+          测试ttt
+        </div>
+        <div class="s on">111</div>
+        <div class="s">222</div>
+      </div>
+      <div class="mock-main">
+        <div class="mock-head">
+          <span class="hd-title">111</span>
+          <span class="hd-ws">
+            <svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/></svg>
+            测试ttt
+          </span>
+          <span class="sp"></span>
+          <button class="mh-btn" title="文件树" style="background:var(--green-soft); color:var(--green-t);">
+            <svg viewBox="0 0 24 24"><path d="M4 6h6M4 12h10M4 18h7"/><path d="M16 6h4M16 12h4M16 18h4"/></svg>
+          </button>
+        </div>
+        <div class="mock-body">对话区…</div>
+      </div>
+      <div class="drawer">
+        <div class="dr-head">
+          <span class="dr-title">文件</span>
+          <span class="dr-tools">
+            <button class="dr-btn" title="显示忽略的目录">
+              <svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+            <button class="dr-btn" title="刷新">
+              <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2.3 5.7"/><path d="M20 5v6h-6"/></svg>
+            </button>
+            <button class="dr-btn" title="收起">
+              <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </span>
+        </div>
+        <div class="dr-path">C:\Users\MasterY\Downloads\ttt</div>
+        <div class="dr-tree">
+          <div class="node d1">
+            <span class="tri"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="ni"><svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/></svg></span>
+            <span class="nm">.ruff_cache</span>
+          </div>
+          <div class="node d1">
+            <span class="tri"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="ni"><svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/></svg></span>
+            <span class="nm">src</span>
+          </div>
+          <div class="node d2 on">
+            <span class="tri leaf"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="ni"><svg viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z"/><path d="M13 3.5v5h5"/></svg></span>
+            <span class="nm">main.ts</span>
+            <span class="sz">2.1 KB</span>
+          </div>
+          <div class="node d2">
+            <span class="tri leaf"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="ni"><svg viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z"/><path d="M13 3.5v5h5"/></svg></span>
+            <span class="nm">App.vue</span>
+            <span class="sz">4.8 KB</span>
+          </div>
+          <div class="node d1">
+            <span class="tri leaf"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="ni"><svg viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z"/><path d="M13 3.5v5h5"/></svg></span>
+            <span class="nm">CLAUDE.md</span>
+            <span class="sz">1.2 KB</span>
+          </div>
+          <div class="node d1">
+            <span class="tri leaf"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+            <span class="ni"><svg viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z"/><path d="M13 3.5v5h5"/></svg></span>
+            <span class="nm">multiplication_table.py</span>
+            <span class="sz">1.8 KB</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cap" style="margin-top:18px">抽屉收起（对话区恢复全宽）</div>
+    <div class="shell closed">
+      <div class="mock-side">
+        <div class="ws">
+          <svg viewBox="0 0 24 24"><path d="M3.5 7.5h6l1.8 2h9.2v9h-17v-11z"/></svg>
+          测试ttt
+        </div>
+        <div class="s on">111</div>
+        <div class="s">222</div>
+      </div>
+      <div class="mock-main">
+        <div class="mock-head">
+          <span class="hd-title">111</span>
+          <span class="sp"></span>
+          <button class="mh-btn" title="文件树">
+            <svg viewBox="0 0 24 24"><path d="M4 6h6M4 12h10M4 18h7"/><path d="M16 6h4M16 12h4M16 18h4"/></svg>
+          </button>
+        </div>
+        <div class="mock-body">对话区…</div>
+      </div>
+      <div class="drawer"></div>
+    </div>
+  </div>
+
+  <table>
+    <tr><th>项</th><th>取值</th><th>理由</th></tr>
+    <tr><td>抽屉宽度</td><td><code>280px</code></td><td>够放两三级缩进 + 文件名 + 大小</td></tr>
+    <tr><td>行高</td><td><code>26px</code></td><td>与侧栏会话项一致</td></tr>
+    <tr><td>缩进</td><td>每级 <code>16px</code></td><td>三级后仍能看清名字</td></tr>
+    <tr><td>默认隐藏</td><td><code>node_modules</code> / <code>.git</code> / <code>dist</code> / <code>target</code> / <code>.ruff_cache</code></td>
+        <td>否则一打开就是几万个文件；顶部眼睛按钮可显示</td></tr>
+    <tr><td>加载方式</td><td>按需展开子目录</td><td>大项目一次扫全盘会卡住界面</td></tr>
+    <tr><td>点文件</td><td>打开现有 <code>FileViewer</code></td><td>复用已有预览，不新造轮子</td></tr>
+  </table>
+
+  <p class="note">
+    <b>为什么选方案 B</b>：你的场景是「对话中要参考文件」，抽屉正好在旁边；与 VS Code / Cursor / Qoder 的交互一致。<br>
+    <b>第一版不做</b>：文件搜索、新建 / 删除 / 重命名、Git 状态标记、拖拽移动。<br>
+    <b>窄窗口</b>：窗口小于 900px 时抽屉宽降到 240px；小于 760px 时叠加在对话区上（不挤压）。
+  </p>
+</section>
+
+<!-- ══════════════ 5 ══════════════ -->
+<section>
+  <h2><span class="num">5</span>宽窗口下内容自适应</h2>
+  <p class="sub">现在内容区固定 720px，最大化后两侧各留 600px 空白。改为随窗口增长，但设可读上限。</p>
+
+  <div class="stage">
+    <div class="cap">1200px 窗口</div>
+    <div class="wide">
+      <div class="wide-bar"><span>窗口 1200</span><span>内容 max-width: min(900px, 100% - 96px)</span></div>
+      <div class="wide-body">
+        <div class="measure" style="width: 84%">900 · 两侧各 150</div>
+      </div>
+    </div>
+
+    <div class="cap" style="margin-top:16px">1920px 窗口（最大化）</div>
+    <div class="wide">
+      <div class="wide-bar"><span>窗口 1920</span><span>内容仍为 900，两侧各 510</span></div>
+      <div class="wide-body">
+        <div class="measure" style="width: 46.9%">900</div>
+      </div>
+    </div>
+
+    <div class="cap" style="margin-top:16px">900px 窗口（窄）</div>
+    <div class="wide">
+      <div class="wide-bar"><span>窗口 900</span><span>内容 804，两侧各 48</span></div>
+      <div class="wide-body">
+        <div class="measure" style="width: 89.3%">804</div>
+      </div>
+    </div>
+  </div>
+
+  <table>
+    <tr><th>窗口宽</th><th>内容宽</th><th>两侧留白</th></tr>
+    <tr><td>900</td><td>804</td><td>各 48</td></tr>
+    <tr><td>1200</td><td>900</td><td>各 150</td></tr>
+    <tr><td>1600</td><td>900</td><td>各 350</td></tr>
+    <tr><td>1920</td><td>900</td><td>各 510</td></tr>
+  </table>
+
+  <p class="note">
+    <b>为什么停在 900</b>：13.5px 字号下 900px 约一行 85 字符。再宽眼睛回行容易串行，反而更难读。<br>
+    <b>同时生效的位置</b>：<code>.thread-inner</code>（消息流）与 <code>.composer-stack</code>（输入框），两者必须一致，
+    否则输入框和消息左右边缘对不齐。<br>
+    <b>最小边距 48px</b>：窗口再窄也不会贴边，<code>100% - 96px</code> 保证左右各剩 48。
+  </p>
+</section>
+
+</body>
+</html>
