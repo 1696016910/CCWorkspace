@@ -145,11 +145,14 @@ async function doCompact(): Promise<void> {
 const ctxPercent = computed(() => {
   const c = current.value
   if (!c) return 0
+  // 一律以 tokens/max 为准。
+  // 不要再回退到 c.contextPercent：那个字段可能是历史脏数据（曾经显示过 100%），
+  // 而 max 为 0 时它没有任何可信度。没有 tokens 就当没有数据。
   if (c.contextMax > 0 && c.contextTokens > 0) {
     const p = (c.contextTokens / c.contextMax) * 100
     return Math.min(Math.max(p, 0), 100)
   }
-  return Math.min(Math.max(c.contextPercent, 0), 100)
+  return 0
 })
 
 /**

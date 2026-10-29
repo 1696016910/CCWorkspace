@@ -709,12 +709,56 @@ fn chat_send(
         let _ = flusher.join();
 
         // 决定这个进程是留着还是丢掉：
-        // - 正常结束 —— 放回池，下次直接复用
+        // - 正常结束 —— 校准上下文后放回池，下次直接复用
         // - 中断/超时 —— 丢掉，下次重建（带 --resume 接回上下文）
         let reusable =
             matches!(&res, Ok(o) if !o.interrupted && !o.timed_out && !o.process_died)
                 && proc.alive();
+
         if reusable {
+            // 用同一个进程问一次 `/context`，拿到权威的上下文占用。
+            //
+            // 为什么必须问：usage 三项和是「一轮内所有内部 API 调用的累计」，
+            // 工具调用越多虚高越厉害。实测同一时刻 usage 报 404k(40%)、
+            // /context 报 42.9k(4.3%)，差 9.4 倍。
+            //
+            // 为什么负担得起：复用常驻进程时 /context 只要 80ms
+            //（新起进程要 4.3s，那是启动开销）。
+            let mut authoritative: Option<(i64, i64, f64)> = None;
+            if proc.alive() {
+                let _ = proc.run_turn(
+                    "/context",
+                    &[],
+                    Arc::new(AtomicBool::new(false)),
+                    |ev| {
+                        if let claude::Event::Context { total, max, percent } = ev {
+                            authoritative = Some((total, max, percent));
+                        }
+                    },
+                );
+            }
+            if let Some((t, m, p)) = authoritative {
+                let _ = db::with(|c| {
+                    service::set_context_usage(c, &sid, t, m, p);
+                    Ok(())
+                });
+                emit(
+                    &app2,
+                    ChatEvent {
+                        kind: "context".into(),
+                        session_id: sid.clone(),
+                        run_id,
+                        delta: None,
+                        tool: None,
+                        message: None,
+                        usage: Some(serde_json::json!({
+                            "tokens": t, "max": m, "percent": p
+                        })),
+                        interrupted: None,
+                        error: None,
+                    },
+                );
+            }
             pool.put_resident(sid.clone(), proc);
         } else {
             drop(proc);

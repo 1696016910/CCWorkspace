@@ -80,6 +80,70 @@ let cacheChars = 0
  * @param cacheable 流式输出必须传 false：每帧都是新字符串，缓存无复用价值，
  *   还会把历史消息的缓存全挤掉。
  */
+
+/**
+ * 超长段落断行。
+ *
+ * 模型有时把几百字压成一整段（实测见过 674 字不分段），读起来很累。
+ * 这里按句子边界插入换行，让 marked 的 `breaks: true` 生成真正的分段。
+ *
+ * 只处理**普通段落**：代码块、表格、标题、列表、引用一律不碰，
+ * 那些结构一旦被插入换行就会破坏渲染。
+ *
+ * @param maxLen 超过这个长度的段落才处理。取 300 是为了避免把正常短段落切开。
+ */
+export function softenLongParagraphs(source: string, maxLen = 300): string {
+  const lines = source.split('\n')
+  const out: string[] = []
+  let inFence = false
+
+  for (const line of lines) {
+    const t = line.trim()
+
+    // 代码围栏：原样保留，进出都要跟踪
+    if (t.startsWith('```') || t.startsWith('~~~')) {
+      inFence = !inFence
+      out.push(line)
+      continue
+    }
+    if (inFence) {
+      out.push(line)
+      continue
+    }
+
+    // 结构行不碰：标题、表格、列表、引用、分隔线、已有缩进
+    const isStructural =
+      t === '' ||
+      t.startsWith('#') ||
+      t.startsWith('|') ||
+      t.startsWith('>') ||
+      t.startsWith('- ') ||
+      t.startsWith('* ') ||
+      /^\d+[.)]\s/.test(t) ||
+      /^[-*_]{3,}$/.test(t) ||
+      /^\s{2,}/.test(line)
+    if (isStructural || t.length <= maxLen) {
+      out.push(line)
+      continue
+    }
+
+    // 按句子切：中文用。！？；，英文用 .!?;  且只在长度够时断
+    const parts = t.split(/(?<=[。！？；.!?;])/)
+    let buf = ''
+    for (const part of parts) {
+      if (buf.length + part.length > maxLen && buf) {
+        out.push(buf)
+        out.push('') // 空行 = 新段落
+        buf = part
+      } else {
+        buf += part
+      }
+    }
+    if (buf) out.push(buf)
+  }
+  return out.join('\n')
+}
+
 export function renderMarkdown(
   source: string | null | undefined,
   cacheable = true,
@@ -94,7 +158,11 @@ export function renderMarkdown(
 
   let raw: string
   try {
-    raw = marked.parse(source, { breaks: true, gfm: true, async: false }) as string
+    raw = marked.parse(softenLongParagraphs(source), {
+      breaks: true,
+      gfm: true,
+      async: false
+    }) as string
   } catch {
     // 畸形输入不该让整条消息消失，降级为纯文本
     raw = source.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c] ?? c)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractFilePaths } from '@/utils/markdown'
+import { extractFilePaths, softenLongParagraphs } from '@/utils/markdown'
 
 describe('extractFilePaths', () => {
   it('不把正文里的斜杠词组当路径', () => {
@@ -29,5 +29,37 @@ describe('extractFilePaths', () => {
 
   it('剥掉尾部的标点', () => {
     expect(extractFilePaths('文件是 /a/b.ts.')).toEqual(['/a/b.ts'])
+  })
+})
+
+describe('超长段落断行', () => {
+  const long = '这是一句测试内容。'.repeat(60) // 约 540 字，无换行
+
+  it('超过阈值的长段落按句号断成多段', () => {
+    const out = softenLongParagraphs(long)
+    expect(out.split('\n\n').length).toBeGreaterThan(1)
+  })
+
+  it('短段落原样保留', () => {
+    const short = '这是一句很短的话。'
+    expect(softenLongParagraphs(short)).toBe(short)
+  })
+
+  it('代码块不碰', () => {
+    const fence = '`'.repeat(3)
+    const code = fence + '\n' + 'x'.repeat(400) + '\n' + fence
+    expect(softenLongParagraphs(code)).toBe(code)
+  })
+
+  it('表格不碰', () => {
+    const table = '| ' + 'a'.repeat(400) + ' |'
+    expect(softenLongParagraphs(table)).toBe(table)
+  })
+
+  it('标题与列表不碰', () => {
+    const h = '# ' + 'x'.repeat(400)
+    const li = '- ' + 'x'.repeat(400)
+    expect(softenLongParagraphs(h)).toBe(h)
+    expect(softenLongParagraphs(li)).toBe(li)
   })
 })
