@@ -6,6 +6,12 @@ const props = defineProps<{
   tokens: number
   max: number
   compacting?: boolean
+  /** 对话进行中：压缩会开第二个 claude 操作同一会话，必须禁用 */
+  streaming?: boolean
+  /** 触发按钮的位置。弹窗贴在它上方，不再靠容器居中猜位置。 */
+  anchor?: { left: number; top: number; right: number } | null
+  /** false = 这个会话还没测过（新建、还没发消息），显示「暂无数据」而不是 0% */
+  hasData?: boolean
 }>()
 
 const emit = defineEmits<{ close: []; compact: [] }>()
@@ -22,27 +28,54 @@ function fmt(n: number): string {
 }
 
 const free = computed(() => Math.max(props.max - props.tokens, 0))
+
+const POP_WIDTH = 380
+
+/**
+ * 由触发按钮的位置算出弹窗坐标。
+ *
+ * 原来靠「对话区居中 + 固定 110px」定位，窗口一宽一窄就错位——
+ * 那个 110px 还是输入框高度的猜测值。
+ */
+const pos = computed(() => {
+  const a = props.anchor
+  if (!a) return { left: '50%', bottom: '110px', transform: 'translateX(-50%)' }
+  // 右对齐按钮右边缘，但不超出窗口
+  const maxLeft = window.innerWidth - POP_WIDTH - 12
+  const left = Math.max(12, Math.min(a.right - POP_WIDTH, maxLeft))
+  return {
+    left: `${left}px`,
+    // 贴按钮上沿，留 8px 间隙。用 top 而不是 bottom：按钮有高度，
+    // 按 bottom 算会让弹窗压住按钮本身。
+    bottom: `${window.innerHeight - a.top + 8}px`,
+    transform: 'none'
+  }
+})
 </script>
 
 <template>
   <div class="scrim" @click.self="emit('close')">
-    <div class="pop">
+    <div class="pop" :style="pos">
       <div class="phead">
         <span class="ptitle">上下文使用情况</span>
         <span class="sp" />
         <button class="x" @click="emit('close')">✕</button>
       </div>
 
-      <div class="big">
+      <div v-if="props.hasData === false" class="nodata">
+        这个会话还没有上下文数据。发一条消息后就会显示。
+      </div>
+
+      <div v-else class="big">
         <span class="pct">{{ pct }}%</span>
         <span class="tokens">{{ fmt(tokens) }} / {{ fmt(max) }} tokens</span>
       </div>
 
-      <div class="bar">
+      <div v-if="props.hasData !== false" class="bar">
         <i :style="{ width: Math.min(percent, 100) + '%' }" :class="{ warn: percent > 80 }" />
       </div>
 
-      <div class="rows">
+      <div v-if="props.hasData !== false" class="rows">
         <div class="row">
           <span>已用上下文</span>
           <span class="mono">{{ fmt(tokens) }}</span>
@@ -57,7 +90,13 @@ const free = computed(() => Math.max(props.max - props.tokens, 0))
         <span>压缩会把历史对话摘要成一段更短的上下文，之后仍可继续对话，但细节会丢失。</span>
       </div>
 
-      <button class="compact-btn" :disabled="compacting" @click="emit('compact')">
+      <p v-if="props.streaming" class="busy-hint">对话进行中，结束后可压缩</p>
+
+      <button
+        class="compact-btn"
+        :disabled="compacting || props.streaming"
+        @click="emit('compact')"
+      >
         {{ compacting ? '压缩中…' : '压缩上下文' }}
       </button>
     </div>
@@ -66,17 +105,16 @@ const free = computed(() => Math.max(props.max - props.tokens, 0))
 
 <style scoped>
 .scrim {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 40;
   background: rgba(0, 0, 0, 0.16);
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding-bottom: 110px;
 }
 
 .pop {
+  /* fixed 才能与 getBoundingClientRect 的视口坐标对齐。
+     absolute 是相对 .scrim（即对话区），会让弹窗整体右移一个侧栏宽度。 */
+  position: fixed;
   width: 380px;
   background: var(--surface);
   border: 1px solid var(--line-2);
@@ -136,7 +174,7 @@ const free = computed(() => Math.max(props.max - props.tokens, 0))
 .bar {
   height: 10px;
   border-radius: 5px;
-  background: #ececee;
+  background: var(--track);
   overflow: hidden;
   margin-bottom: 12px;
 }
@@ -185,12 +223,25 @@ const free = computed(() => Math.max(props.max - props.tokens, 0))
 
 .compact-btn:hover:not(:disabled) {
   background: var(--bg-hover);
-  border-color: #bfc3c7;
+  border-color: var(--add-row-line);
 }
 
 .compact-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.nodata {
+  padding: 14px 0 16px;
+  font-size: 12.5px;
+  color: var(--t4);
+  line-height: 1.7;
+}
+
+.busy-hint {
+  margin-bottom: 8px;
+  font-size: 11.5px;
+  color: var(--t4);
 }
 
 .notice {

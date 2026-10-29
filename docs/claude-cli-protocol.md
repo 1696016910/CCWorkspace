@@ -146,22 +146,50 @@ hook 事件**不算**——否则挂住的 hook 会一直刷新超时计时器�
 
 ## 7. 上下文用量
 
-两个来源，优先级不同：
+### 7.1 CLI 没有直接给出「当前上下文多大」
 
-| 来源 | 字段 | 性质 |
+实测 10 轮对话，两种候选口径都不合格：
+
+| 口径 | 实测序列 | 问题 |
 |---|---|---|
-| `assistant.context_usage` | `total_tokens` / `raw_max_tokens` / `percentage` | **权威值**，CLI 自己算的 |
-| `result.usage` | `input_tokens` + `output_tokens` + cache 字段 | 推算值，仅作兜底 |
+| `usage` 三项之和 | 77246 → 85823 → 94302 → **47490** → 47769 | 单轮值；缓存命中状态一变就回落，实测跳 4.7 个百分点 |
+| `modelUsage` 三项 | 7.7% → 15.6% → 27.5% → 36.3% → **41.1%** | 会话累计值；把每轮输入累加，第 5 轮就虚报 41% |
+| `modelUsage.inputTokens` 单取 | 6975 → 13380 → 20685 → 24756 | 只是「未命中缓存的部分」，不含 cache_read |
 
-**两套口径不能混写同一个字段**，否则百分比会在 50% 与 5% 之间跳变。
+**没有一个字段等于「当前上下文大小」。** 这是 CLI 的接口限制，不是实现缺陷。
 
-推算值为：
+### 7.2 采用的方案
+
+**优先用 `/context` 的权威值，否则用本轮 usage 的输入三项之和。**
+
 ```
-used = input_tokens + cache_read_input_tokens + cache_creation_input_tokens + output_tokens
-pct  = used / modelUsage[model].contextWindow * 100
+# 1. 若本轮输出是 /context 的结果，直接解析这一行
+**Tokens:** 21.2k / 1m (2%)
+   → used = 21200, max = 1000000, pct = 2.1%
+
+# 2. 否则
+used = usage.input_tokens + cache_read_input_tokens + cache_creation_input_tokens
+pct  = clamp(used / contextWindow * 100, 0, 100)
 ```
 
-分母取 `modelUsage` 中 `contextWindow` 最大的那条（多模型时选主模型的窗口）。
+不含 `output_tokens`：输出还没进上下文。
+
+### 7.3 不要做「历史峰值」平滑
+
+曾经为了消除缓存抖动导致的回落，做过「记住历史最大值、只增不减」。**这是错的。**
+
+真实案例：某轮读 PDF 把上下文撑到 142k，之后 CLI 清理了内容实际只剩 21k，
+而峰值让界面一直显示 14%（Claude 自己报 3%），差了 4 倍。
+
+上下文是会被清理和压缩的，**回落是真实的**，必须如实反映。
+
+### 7.4 `/compact` 也是本地命令
+
+实测 `subtype = success`、`is_error = false`，但 `result` 是**空字符串**
+（响应里有 `local_command: "compact"`）。它只做压缩，不产摘要文本。
+
+把空文本当失败会导致每次都报「压缩没有返回摘要」。
+压缩后上下文会真的变小（实测 142k → 45k），但新的准确值要等下一轮对话才能拿到。
 
 ## 8. 实测样本
 
@@ -188,3 +216,63 @@ result/success         × 1   (is_error = false, input_tokens = 37866, output_to
 
 注意 `input_tokens = 37866` 是**首次会话的系统提示开销**，包含所有 Skill 定义与工具 schema。
 这解释了为什么新会话一开就占用数万 token。
+
+## 9. 实测补充（0.2.2 修复期）
+
+### 9.1 图片内容块可用
+
+`content` 数组里除 `text` 之外，可以放标准 API 格式的 image 块：
+
+```json
+{"type":"image","source":{"type":"base64","media_type":"image/png","data":"<base64>"}}
+```
+
+实测：发一张 64×64 纯蓝 PNG，模型回答「蓝色」，`result.is_error = false`。
+字段名与 Claude API 一致，不需要额外转换。
+
+**注意**：整行 NDJSON 是一次性写入 stdin 的，图片越大这行越长。
+`invoke` 传 base64 与 CLI 读 stdin 两处都有实际上限，超限时 CLI 会返回 `is_error`，
+界面上的表现是「发送失败」——所以失败文案必须点明与附件有关。
+
+### 9.2 init 事件带完整能力清单
+
+`system/init` 里除 `session_id` 外还有：
+
+| 字段 | 类型 | 实测数量 | 说明 |
+|---|---|---|---|
+| `slash_commands` | string[] | 143 | 全部可用 `/` 命令 |
+| `skills` | string[] | 65 | Skill 名单（上面那个的子集） |
+| `agents` | string[] | 20 | Agent 名单 |
+| `plugins` | object[] | 21 | `{name, path, source, version}` |
+| `terminal_slash_commands` | string[] | 4 | 只能在终端用 |
+| `mcp_servers` | object[] | 4 | `{name, status, source}` |
+
+**`slash_commands` 是超集**：用户的 Skill、用户命令、项目命令（以 `dir:name` 形式）、
+插件命令与 CLI 内置命令全在里面。扫目录只能拿到子集，拿不到内置命令。
+
+**但只有名字没有描述。** 描述要从本地文件补：Skill 取 frontmatter 的 `description`，
+命令取首段文字，内置命令补不到就留空。
+
+**时机**：init 只在发消息之后到达。首屏空会话时是空的。
+
+### 9.3 停止必须杀整棵进程树
+
+Windows 下命令链是 `cmd.exe /d /s /c claude` → `node` → 工具子进程。
+`child.kill()` 只杀最外层 `cmd.exe`，`node` 会存活并继续往管道写。
+
+实测对比：
+
+```
+裸 kill：  杀掉 cmd 后 node 仍存活  → 内容在几秒后一起涌出来
+taskkill /T /F：cmd 与 node 都终止  → 停止立即生效
+```
+
+### 9.4 30 秒空闲超时
+
+原文档第 5 节写了这条但代码里没有。现已实现：连续 30 秒没有
+`init` / `stream_event` / `assistant` / `result` 中任意一类事件，就终止进程并报超时。
+
+hook 事件**不计入**——挂住的 hook 会不断刷新计时器，让超时永远触发不了。
+
+实现方式是读线程 + `recv_timeout(100ms)` 轮询：直接 `for line in reader.lines()`
+是阻塞的，模型思考期间不产出任何行，停止标志永远读不到。

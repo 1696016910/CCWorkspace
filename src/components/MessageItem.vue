@@ -2,10 +2,15 @@
 import { computed, ref } from 'vue'
 import type { ChatMessage } from '@/api/types'
 import { extractFilePaths, renderMarkdown } from '@/utils/markdown'
+import MessageAttachments from './MessageAttachments.vue'
 import { open as openExternal } from '@tauri-apps/plugin-dialog'
 
-const props = defineProps<{ message: ChatMessage }>()
-const emit = defineEmits<{ 'open-file': [path: string] }>()
+const props = defineProps<{
+  message: ChatMessage
+  /** 可预览的路径集合。工作区外的文件只显示不可点，避免点了才报错。 */
+  previewable?: Set<string>
+}>()
+const emit = defineEmits<{ 'open-file': [path: string]; 'preview-image': [src: string] }>()
 
 const expanded = ref(false)
 const copied = ref(false)
@@ -74,7 +79,15 @@ void openExternal
 
 <template>
   <div v-if="isUser" class="msg-user" :data-mid="message.id">
-    <div class="bubble">{{ message.text }}</div>
+    <div class="u-wrap">
+      <div class="bubble">{{ message.text }}</div>
+      <MessageAttachments
+        v-if="message.attachments?.length"
+        :items="message.attachments"
+        @open-file="emit('open-file', $event)"
+        @preview-image="emit('preview-image', $event)"
+      />
+    </div>
     <button class="user-copy" :title="copied ? '已复制' : '复制'" @click="copyText">
       {{ copied ? '✓' : '⧉' }}
     </button>
@@ -125,10 +138,21 @@ void openExternal
       </div>
 
       <div v-if="files.length" class="files">
-        <button v-for="f in files" :key="f" class="file-chip" :title="f" @click="openFile(f)">
-          <svg viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z" /><path d="M13 3.5v5h5" /></svg>
-          {{ f.split(/[\\/]/).pop() }}
-        </button>
+        <template v-for="f in files" :key="f">
+          <button
+            v-if="props.previewable?.has(f)"
+            class="file-chip"
+            :title="f"
+            @click="openFile(f)"
+          >
+            <svg viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z" /><path d="M13 3.5v5h5" /></svg>
+            {{ f.split(/[\\/]/).pop() }}
+          </button>
+          <span v-else class="file-chip disabled" :title="`${f}（工作区外文件，无法预览）`">
+            <svg viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z" /><path d="M13 3.5v5h5" /></svg>
+            {{ f.split(/[\\/]/).pop() }}
+          </span>
+        </template>
       </div>
     </div>
   </div>
@@ -144,8 +168,17 @@ void openExternal
   position: relative;
 }
 
-.msg-user .bubble {
+.u-wrap {
+  /* 气泡与附件卡共用一个右对齐容器，宽度按最宽的内容定 */
   max-width: 78%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.msg-user .bubble {
+  max-width: 100%;
   background: var(--bg-bubble);
   border-radius: 14px 14px 4px 14px;
   padding: 10px 15px;
@@ -531,6 +564,18 @@ void openExternal
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 10px;
+}
+
+.file-chip.disabled {
+  color: var(--t4);
+  border-style: dashed;
+  cursor: default;
+  opacity: 0.75;
+}
+
+.file-chip.disabled:hover {
+  background: transparent;
+  border-color: var(--line-3);
 }
 
 .file-chip {

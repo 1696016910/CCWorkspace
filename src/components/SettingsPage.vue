@@ -5,6 +5,7 @@ import EnvSection from './settings/EnvSection.vue'
 import PermissionsSection from './settings/PermissionsSection.vue'
 import ModelsSection from './settings/ModelsSection.vue'
 import SkillsSection from './settings/SkillsSection.vue'
+import RulesSection from './settings/RulesSection.vue'
 import PluginsSection from './settings/PluginsSection.vue'
 import MarketplacesSection from './settings/MarketplacesSection.vue'
 import UpdateSection from './settings/UpdateSection.vue'
@@ -18,6 +19,7 @@ const TABS = [
   { id: 'perm', label: '权限', icon: 'shield' },
   { id: 'model', label: '模型', icon: 'box' },
   { id: 'skills', label: 'Skill', icon: 'spark' },
+  { id: 'rules', label: '规则', icon: 'rule' },
   { id: 'plugins', label: '插件', icon: 'grid' },
   { id: 'market', label: '插件仓库', icon: 'globe' },
   { id: 'update', label: '更新', icon: 'up' }
@@ -37,7 +39,7 @@ onUnmounted(() => window.removeEventListener('keydown', onEsc))
 const groups = [
   { name: '工作', ids: ['ws'] as TabId[] },
   { name: '配置', ids: ['env', 'perm', 'model'] as TabId[] },
-  { name: '扩展', ids: ['skills', 'plugins', 'market'] as TabId[] },
+  { name: '扩展', ids: ['skills', 'rules', 'plugins', 'market'] as TabId[] },
   { name: '关于', ids: ['update'] as TabId[] }
 ]
 
@@ -51,7 +53,11 @@ function iconOf(id: TabId): string {
 
 /** 卡片型分区的容器要更宽，否则 auto-fill 只能排两列 */
 const isCardLayout = computed(
-  () => active.value === 'skills' || active.value === 'plugins' || active.value === 'market'
+  () =>
+    active.value === 'skills' ||
+    active.value === 'rules' ||
+    active.value === 'plugins' ||
+    active.value === 'market'
 )
 
 const ICONS: Record<string, string> = {
@@ -60,6 +66,7 @@ const ICONS: Record<string, string> = {
   shield: 'M12 3l8 4v5c0 4.4-3.2 8.2-8 9-4.8-.8-8-4.6-8-9V7l8-4z',
   box: 'M5 5h14v14H5zM9 9h6M9 13h4',
   spark: 'M12 3l2.5 5.5L20 11l-5.5 2.5L12 19l-2.5-5.5L4 11l5.5-2.5z',
+  rule: 'M5 4.5h9l4 4v11H5zM8 10h7M8 13.5h7M8 17h4',
   grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
   globe: 'M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18',
   up: 'M12 18V8M8 12l4-4 4 4M3 12a9 9 0 1118 0 9 9 0 01-18 0z'
@@ -69,10 +76,6 @@ const ICONS: Record<string, string> = {
 <template>
   <div class="settings">
     <div class="st-bar">
-      <button class="back" type="button" @click="emit('close')" title="返回主界面">
-        <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" /></svg>
-        返回
-      </button>
       <span class="st-title">设置</span>
       <span class="sp" />
       <button class="close-btn" title="关闭设置" @click="emit('close')">
@@ -102,6 +105,7 @@ const ICONS: Record<string, string> = {
           <PermissionsSection v-else-if="active === 'perm'" />
           <ModelsSection v-else-if="active === 'model'" />
           <SkillsSection v-else-if="active === 'skills'" />
+          <RulesSection v-else-if="active === 'rules'" />
           <PluginsSection v-else-if="active === 'plugins'" />
           <MarketplacesSection v-else-if="active === 'market'" />
           <UpdateSection v-else />
@@ -128,34 +132,6 @@ const ICONS: Record<string, string> = {
   padding: 0 16px;
   background: var(--bg-bar);
   border-bottom: 1px solid var(--line);
-}
-
-.st-bar .back {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 12px 0 9px;
-  border-radius: 8px;
-  border: 1px solid var(--line-2);
-  background: var(--surface);
-  color: var(--t1);
-  font-size: 13px;
-  transition: background 0.14s, border-color 0.14s;
-}
-
-.st-bar .back:hover {
-  background: var(--bg-hover);
-  border-color: var(--line-3);
-}
-
-.st-bar .back svg {
-  width: 15px;
-  height: 15px;
-  stroke: currentColor;
-  fill: none;
-  stroke-width: 2;
-  stroke-linecap: round;
 }
 
 .st-title {

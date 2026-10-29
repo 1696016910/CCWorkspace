@@ -141,7 +141,7 @@ onMounted(load)
   width: 21px;
   height: 21px;
   border-radius: 4px;
-  color: #a0a0a7;
+  color: var(--t4);
   font-size: 10.5px;
   display: grid;
   place-items: center;
@@ -175,11 +175,11 @@ onMounted(load)
   border-radius: 8px;
   font-size: 12px;
   color: var(--t3);
-  background: #fcfcfd;
+  background: var(--add-row-bg);
 }
 
 .add-row:hover {
-  border-color: #bfc3c7;
+  border-color: var(--add-row-line);
   color: var(--t2);
   background: var(--bg-soft);
 }

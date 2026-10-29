@@ -12,7 +12,17 @@ const content = ref('')
 const mode = ref<'preview' | 'code'>('preview')
 const meta = ref<fileApi.FileContent | null>(null)
 
-const isMarkdown = computed(() => /\.(md|markdown)$/i.test(props.path))
+/**
+ * 是否为 Markdown 文件。
+ *
+ * 只按路径后缀判断，不看后端返回的 `ext`——那个字段带前导点（".md"），
+ * 与不带点的正则匹配不上，曾经导致 Markdown 默认落到源码模式。
+ */
+function isMarkdownPath(p: string): boolean {
+  return /\.(md|markdown)$/i.test(p)
+}
+
+const isMarkdown = computed(() => isMarkdownPath(props.path))
 
 const name = computed(() => props.path.split(/[\/]/).pop() ?? props.path)
 
@@ -33,8 +43,10 @@ async function load(): Promise<void> {
     const d = await fileApi.read(props.path)
     meta.value = d
     content.value = d.text
-    // Markdown 默认预览，其余直接看源码
-    mode.value = /^(md|markdown)$/i.test(d.ext) ? 'preview' : 'code'
+    // Markdown 默认预览，其余直接看源码。
+    // 后端返回的 ext 带前导点（".md"），匹配时必须带上它——
+    // 原来写成 /^(md|markdown)$/ 永远不命中，导致 Markdown 一律落到源码模式。
+    mode.value = isMarkdownPath(props.path) ? 'preview' : 'code'
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {

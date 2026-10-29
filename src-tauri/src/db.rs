@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-pub const SCHEMA_VERSION: i32 = 4;
+pub const SCHEMA_VERSION: i32 = 5;
 
 /// 与 Node 版逐条对应的迁移脚本。
 const MIGRATIONS: &[(i32, &str)] = &[
@@ -69,6 +69,12 @@ const MIGRATIONS: &[(i32, &str)] = &[
         ",
     ),
     (4, "ALTER TABLE messages ADD COLUMN stopped INTEGER NOT NULL DEFAULT 0;"),
+    // 附件元数据：JSON 数组，含 kind/name/path/size。图片不存 base64，
+    // 只存路径，缩略图按需重读，避免数据库膨胀。
+    (
+        5,
+        "ALTER TABLE messages ADD COLUMN attachments TEXT;",
+    ),
 ];
 
 /// 全局连接。Tauri 命令都是同步短事务，用一把锁足够。

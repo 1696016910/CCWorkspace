@@ -92,8 +92,9 @@ const groups = computed<Group[]>(() =>
 
 /* ── 新建会话 ── */
 async function newChatIn(workspaceId: string): Promise<void> {
+  // 只开一个空白对话页，不落库：输入第一条消息后才成为真正的会话，
+  // 那时左侧列表才会出现它。所以这里不该提示「已新建」。
   await sessions.create(workspaceId)
-  toast.success('已新建会话')
 }
 
 /* ── 删除（先弹确认） ── */
@@ -107,7 +108,8 @@ async function confirmPending(): Promise<void> {
   if (!p) return
 
   if (p.kind === 'session') {
-    if (chat.streamingSessionId === p.id) await chat.stop()
+    if (chat.isStreaming(p.id)) await chat.stop(p.id)
+    chat.forget(p.id)
     await sessions.remove(p.id)
     toast.info('已删除 1 个会话')
   } else {
@@ -379,12 +381,17 @@ const ICONS: Record<string, string> = {
               @keydown.esc="renamingId = null"
               @blur="commitRename"
             />
-            <span v-else class="chat-title">{{ displayTitle(sessions.list, s) }}</span>
+            <span
+              v-else
+              class="chat-title"
+              :class="{ unread: chat.unseen.has(s.id) }"
+            >{{ displayTitle(sessions.list, s) }}</span>
 
             <span class="chat-time">{{ relTime(s.updatedAt) }}</span>
             <span
               class="chat-dot"
-              :class="chat.streamingSessionId === s.id ? 'live' : 'idle'"
+              :class="chat.isStreaming(s.id) ? 'live' : chat.unseen.has(s.id) ? 'unseen' : 'idle'"
+              :title="chat.isStreaming(s.id) ? '正在生成' : chat.unseen.has(s.id) ? '有新回复' : ''"
             />
             <button class="row-btn more" title="更多" @click.stop="openMenu($event, sessionMenu(s))">
               <svg viewBox="0 0 24 24">
@@ -714,6 +721,16 @@ const ICONS: Record<string, string> = {
 .chat-dot.live {
   background: var(--green);
   animation: pulse 1.2s infinite;
+}
+
+.chat-title.unread {
+  font-weight: 600;
+  color: var(--t1);
+}
+
+.chat-dot.unseen {
+  background: var(--warn-t);
+  animation: pulse 2s infinite;
 }
 
 .chat-dot.idle {

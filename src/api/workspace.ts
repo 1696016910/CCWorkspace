@@ -22,6 +22,27 @@ export function pin(id: string, pinned: boolean): Promise<void> {
   return call('workspace_pin', { id, pinned })
 }
 
+export interface TreeNode {
+  name: string
+  path: string
+  isDir: boolean
+  size?: number
+}
+
+/** 列一层目录；rel 为空表示工作区根。供文件树按需展开。 */
+export function listDir(
+  workspaceId: string,
+  rel: string,
+  showIgnored: boolean
+): Promise<TreeNode[]> {
+  return call('workspace_list_dir', { workspaceId, rel, showIgnored })
+}
+
+/** 在系统文件管理器中打开该工作区目录。 */
+export function reveal(id: string): Promise<void> {
+  return call('workspace_reveal', { id })
+}
+
 /** 打开系统目录选择框，取消时返回 null。 */
 export async function pick(): Promise<string | null> {
   const picked = await open({ directory: true, multiple: false, title: '选择项目目录' })

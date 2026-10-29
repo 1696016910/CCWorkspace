@@ -156,12 +156,31 @@ export function renderMarkdown(
  * 同时支持 Windows（C:\a\b.txt）与 POSIX（/a/b.txt）。
  * 结尾标点会剥掉，避免把句号当成文件名的一部分。
  */
+/**
+ * 已知的文本/代码扩展名。
+ *
+ * 只认这些：原来的正则把「以斜杠开头、中间还有斜杠的任意串」都当路径，
+ * 于是正文里「处理 Word/Excel/PPT/PDF 文件」会被当成 `/Excel/PPT/PDF`，
+ * 渲染成可点卡片，点了报「只能预览当前工作区内的文件」。
+ */
+const FILE_EXTS =
+  'md|markdown|txt|log|json|jsonc|ya?ml|toml|ini|conf|cfg|env|' +
+  'ts|tsx|js|jsx|mjs|cjs|vue|svelte|css|scss|sass|less|html|htm|xml|svg|' +
+  'rs|go|py|java|kt|cs|c|cc|cpp|h|hpp|rb|php|swift|sh|bash|zsh|ps1|bat|cmd|' +
+  'sql|graphql|proto|lua|dart|ex|exs|scala|clj|hs|pl'
+
+const FILE_PATH_RE = new RegExp(
+  // 盘符路径，或 Unix 风格绝对路径，都强制要求扩展名
+  `(?:[A-Za-z]:[\\\\/][^\\s"'\`<>|]*?\\.(?:${FILE_EXTS})\\b` +
+    `|(?<![\\w/])/(?:[^\\s"'\`<>|/]+/)*[^\\s"'\`<>|/]+\\.(?:${FILE_EXTS})\\b)`,
+  'gi'
+)
+
 export function extractFilePaths(text: string): string[] {
-  const re =
-    /(?:[A-Za-z]:[\\/][^\s"'`<>|]*\.[A-Za-z0-9]{1,8}|\/[^\s"'`<>|]*\/[^\s"'`<>|]*)/g
   const out = new Set<string>()
   let m: RegExpExecArray | null
-  while ((m = re.exec(text)) !== null) {
+  FILE_PATH_RE.lastIndex = 0
+  while ((m = FILE_PATH_RE.exec(text)) !== null) {
     const raw = m[0].replace(/[.,;:)\]，。；：]+$/, '')
     if (raw.length > 3) out.add(raw)
   }

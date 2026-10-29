@@ -209,7 +209,7 @@ onUnmounted(() => window.removeEventListener('keydown', onEsc))
 
 .btn.dgr {
   color: var(--red);
-  border-color: #e9c9c7;
+  border-color: var(--danger-line);
 }
 
 .btn.dgr:hover {

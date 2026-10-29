@@ -248,7 +248,28 @@ pub fn read_permissions() -> Result<Permissions, String> {
     })
 }
 
+/// 校验规则列表：任一条为空或重复都拒绝，并把问题指出来。
+///
+/// 界面已经拦过一次，但前端拦不住的东西后端必须自己拦——否则任何绕过界面的调用
+/// 都能把空规则或重复规则写进用户的 settings.json。
+fn validate_rules(kind: &str, rules: &[String]) -> Result<(), String> {
+    for (i, r) in rules.iter().enumerate() {
+        if r.trim().is_empty() {
+            return Err(format!("{kind}规则第 {} 条为空，请填写或删除该行", i + 1));
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    for (i, r) in rules.iter().enumerate() {
+        if !seen.insert(r.trim()) {
+            return Err(format!("{kind}规则第 {} 条与前面重复：{}", i + 1, r.trim()));
+        }
+    }
+    Ok(())
+}
+
 pub fn save_permissions(next: &Permissions) -> Result<(), String> {
+    validate_rules("允许", &next.allow)?;
+    validate_rules("拒绝", &next.deny)?;
     let mtime = stat_mtime();
     let mut raw = read_raw()?;
     raw.insert(
@@ -320,5 +341,23 @@ mod tests {
     #[test]
     fn model_keys_cover_all_six() {
         assert_eq!(MODEL_KEYS.len(), 6);
+    }
+
+    #[test]
+    fn permission_rules_reject_empty() {
+        let err = validate_rules("允许", &["Bash(git:*)".into(), "  ".into()]).unwrap_err();
+        assert!(err.contains("第 2 条为空"), "实际: {err}");
+    }
+
+    #[test]
+    fn permission_rules_reject_duplicates() {
+        let err = validate_rules("拒绝", &["Read(.env)".into(), "Read(.env)".into()]).unwrap_err();
+        assert!(err.contains("重复"), "实际: {err}");
+    }
+
+    #[test]
+    fn permission_rules_accept_valid() {
+        assert!(validate_rules("允许", &["Bash(git diff:*)".into(), "Bash(git status:*)".into()]).is_ok());
+        assert!(validate_rules("允许", &[]).is_ok(), "空列表是合法的");
     }
 }

@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Claude 工作台 · Tauri 版",
         "width": 1200,
         "height": 800,

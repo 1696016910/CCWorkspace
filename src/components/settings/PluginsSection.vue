@@ -229,7 +229,7 @@ onMounted(load)
 }
 
 .dot.off {
-  background: #c6c6cb;
+  background: var(--dot-off);
 }
 
 .ok {

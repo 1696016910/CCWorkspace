@@ -32,6 +32,24 @@
   --red: #c0392b;
   --blue: #1668c9;
 
+  /* 控件底色。暗色下必须换掉，否则浅底浅字看不见 */
+  --btn-bg: #fcfcfc;
+  --info-bg: #f5f8fc;
+  --info-line: #dee7f4;
+  --info-t: #3f5c7e;
+  --dot-off: #c6c6cb;
+  --track: #dcdcde;
+  --track-h: #c8c8cc;
+  --sel: #cfe3d6;
+  --add-row-bg: #fcfcfd;
+  --add-row-line: #bfc3c7;
+  --toggle-off: #d6d6d8;
+  --toggle-knob: #fff;
+  --scrim: rgba(10, 10, 14, 0.45);
+  --shadow-sm: 0 1px 3px rgba(31, 31, 35, 0.05);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.28);
+
   --r: 6px;
   --r-lg: 10px;
 
@@ -85,7 +103,7 @@ textarea {
 }
 
 ::selection {
-  background: #cfe3d6;
+  background: var(--sel);
 }
 
 ::-webkit-scrollbar {
@@ -98,14 +116,14 @@ textarea {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #dcdcde;
+  background: var(--track);
   border-radius: 10px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #c8c8cc;
+  background: var(--track-h);
   border: 3px solid transparent;
   background-clip: content-box;
 }
@@ -116,7 +134,7 @@ textarea {
   height: 18px;
   border-radius: 9px;
   flex: none;
-  background: #d6d6d8;
+  background: var(--toggle-off);
   position: relative;
   transition: background 0.16s;
 }
@@ -129,7 +147,7 @@ textarea {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--toggle-knob);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   transition: left 0.16s;
 }
@@ -175,6 +193,23 @@ textarea {
   --green-soft: #1e2b23;
   --red: #e06c66;
   --blue: #6aa8e8;
+
+  --btn-bg: #26262b;
+  --info-bg: #1e2633;
+  --info-line: #2b3a4d;
+  --info-t: #9dbcdd;
+  --dot-off: #4a4a52;
+  --track: #3a3a42;
+  --track-h: #4a4a54;
+  --sel: #2c4437;
+  --add-row-bg: #212126;
+  --add-row-line: #4a4a52;
+  --toggle-off: #3d3d45;
+  --toggle-knob: #d8d8de;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.6);
 }
 
 :root[data-theme='dark'] body {
@@ -201,7 +236,7 @@ textarea {
   padding: 0 14px;
   border-radius: var(--r);
   border: 1px solid var(--line-3);
-  background: #fcfcfc;
+  background: var(--btn-bg);
   font-size: 12px;
   color: var(--t1);
   transition: background 0.12s;
@@ -243,13 +278,13 @@ textarea {
 }
 
 .st-notice.info {
-  background: #f5f8fc;
-  border: 1px solid #dee7f4;
-  color: #3f5c7e;
+  background: var(--info-bg);
+  border: 1px solid var(--info-line);
+  color: var(--info-t);
 }
 
 .st-notice.warn {
   background: var(--danger-bg);
   border: 1px solid var(--danger-line);
-  color: #8a4b47;
+  color: var(--danger-t);
 }

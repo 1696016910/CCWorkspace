@@ -175,11 +175,11 @@ async function confirmRemove(): Promise<void> {
   border-radius: 8px;
   font-size: 12px;
   color: var(--t3);
-  background: #fcfcfd;
+  background: var(--add-row-bg);
 }
 
 .add-row:hover {
-  border-color: #bfc3c7;
+  border-color: var(--add-row-line);
   color: var(--t2);
   background: var(--bg-soft);
 }

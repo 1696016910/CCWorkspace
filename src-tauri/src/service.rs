@@ -51,6 +51,21 @@ pub struct ChatMessage {
     pub timestamp: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stopped: bool,
+    /// 这条消息带过的附件。图片不存内容，只存路径与大小。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
+}
+
+/// 附件元数据。与前端 `Attachment` 对应，但不含 base64。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    /// image | file
+    pub kind: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub size: i64,
 }
 
 /// 从首条消息生成标题，按字符截断不切坏 emoji。
@@ -374,7 +389,7 @@ pub fn list_messages(
     // 取最近 N 条再按时间正序，保证界面从旧到新
     let mut stmt = conn
         .prepare(
-            "SELECT id, role, content, tools, created_at, stopped FROM (
+            "SELECT id, role, content, tools, created_at, stopped, attachments FROM (
                SELECT * FROM messages WHERE session_id = ?1
                 ORDER BY created_at DESC LIMIT ?2
              ) ORDER BY created_at ASC",
@@ -393,6 +408,10 @@ pub fn list_messages(
                 tools,
                 timestamp: r.get(4)?,
                 stopped: r.get::<_, i64>(5).unwrap_or(0) != 0,
+                attachments: r
+                    .get::<_, Option<String>>(6)?
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_default(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -415,6 +434,7 @@ pub fn append_message(
     content: &str,
     tools: &[ToolCall],
     stopped: bool,
+    attachments: &[Attachment],
 ) -> Result<ChatMessage, String> {
     // 会话已删除时拒绝写入，避免消息挂到回收站里的会话上
     let exists: Option<String> = conn
@@ -436,10 +456,15 @@ pub fn append_message(
     } else {
         Some(serde_json::to_string(tools).map_err(|e| e.to_string())?)
     };
+    let att_json = if attachments.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(attachments).map_err(|e| e.to_string())?)
+    };
     conn.execute(
-        "INSERT INTO messages(id, session_id, role, content, tools, created_at, stopped)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![id, session_id, role, content, tools_json, now, if stopped { 1 } else { 0 }],
+        "INSERT INTO messages(id, session_id, role, content, tools, created_at, stopped, attachments)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![id, session_id, role, content, tools_json, now, if stopped { 1 } else { 0 }, att_json],
     )
     .map_err(|e| e.to_string())?;
     conn.execute(
@@ -475,6 +500,7 @@ pub fn append_message(
         tools: tools.to_vec(),
         timestamp: Some(now),
         stopped,
+        attachments: attachments.to_vec(),
     })
 }
 
@@ -540,7 +566,7 @@ mod tests {
         assert_eq!(list.len(), 1);
 
         // 首条用户消息自动成标题
-        append_message(&c, &s.id, "user", "帮我改代码", &[], false).unwrap();
+        append_message(&c, &s.id, "user", "帮我改代码", &[], false, &[]).unwrap();
         let list = list_sessions(&c).unwrap();
         assert_eq!(list[0].title, "帮我改代码");
 
@@ -564,7 +590,7 @@ mod tests {
         let w = add_workspace(&c, &dir.to_string_lossy(), "t").unwrap();
         let s = create_session(&c, &w.id).unwrap();
         delete_session(&c, &s.id).unwrap();
-        assert!(append_message(&c, &s.id, "user", "x", &[], false).is_err());
+        assert!(append_message(&c, &s.id, "user", "x", &[], false, &[]).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -575,8 +601,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let w = add_workspace(&c, &dir.to_string_lossy(), "t").unwrap();
         let s = create_session(&c, &w.id).unwrap();
-        append_message(&c, &s.id, "user", "第一句", &[], false).unwrap();
-        append_message(&c, &s.id, "assistant", "回答", &[], false).unwrap();
+        append_message(&c, &s.id, "user", "第一句", &[], false, &[]).unwrap();
+        append_message(&c, &s.id, "assistant", "回答", &[], false, &[]).unwrap();
         let copy = duplicate_session(&c, &s.id).unwrap();
         assert_eq!(count_messages(&c, &copy.id).unwrap(), 2);
         let _ = std::fs::remove_dir_all(&dir);
