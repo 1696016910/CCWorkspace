@@ -7,6 +7,8 @@ import { open as openExternal } from '@tauri-apps/plugin-dialog'
 
 const props = defineProps<{
   message: ChatMessage
+  /** 本轮耗时（毫秒）。只在本次运行内有效 */
+  durationMs?: number
   /** 可预览的路径集合。工作区外的文件只显示不可点，避免点了才报错。 */
   previewable?: Set<string>
 }>()
@@ -61,6 +63,16 @@ const isUser = computed(() => props.message.role === 'user')
 const hasTools = computed(() => (props.message.tools?.length ?? 0) > 0)
 const html = computed(() => renderMarkdown(props.message.text))
 const files = computed(() => extractFilePaths(props.message.text))
+
+/** 毫秒 → "1m 35s" / "4.2s" */
+function fmtDuration(ms: number): string {
+  // 先四舍五入到整秒再拆分，否则 59.6s 会算成 0m 60s
+  const total = Math.round(ms / 1000)
+  if (total < 60) return `${(ms / 1000).toFixed(1)}s`
+  const m = Math.floor(total / 60)
+  const rest = total % 60
+  return rest ? `${m}m ${rest}s` : `${m}m`
+}
 
 function time(iso?: string): string {
   if (!iso) return ''
@@ -125,6 +137,14 @@ void openExternal
       <div v-if="message.stopped" class="stopped-msg">
         <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" /></svg>
         <span>已停止生成</span>
+      </div>
+
+      <!-- 本轮耗时，与 CLI 的 "Cooked for 1m 35s" 一致 -->
+      <div v-if="props.durationMs" class="cooked">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+        <span>耗时 {{ fmtDuration(props.durationMs) }}</span>
+        <span class="cooked-sep">·</span>
+        <span class="cooked-done">完成 {{ time(message.timestamp) }}</span>
       </div>
 
       <div class="msg-actions">
@@ -523,6 +543,32 @@ void openExternal
   color: var(--t4);
 }
 
+.cooked {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--t4);
+}
+
+.cooked svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+
+.cooked-sep {
+  opacity: 0.5;
+}
+
+.cooked-done {
+  font-family: var(--mono);
+}
+
 .msg-actions {
   display: flex;
   gap: 4px;
@@ -531,7 +577,33 @@ void openExternal
   transition: opacity 0.12s;
 }
 
-.msg-ai:hover .msg-actions {
+.msg-ai:hover .cooked {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--t4);
+}
+
+.cooked svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+
+.cooked-sep {
+  opacity: 0.5;
+}
+
+.cooked-done {
+  font-family: var(--mono);
+}
+
+.msg-actions {
   opacity: 1;
 }
 

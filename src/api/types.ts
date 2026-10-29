@@ -36,6 +36,8 @@ export interface ChatMessage {
   stopped?: boolean
   /** 这条消息带过的附件。图片只存路径，不存内容。 */
   attachments?: StoredAttachment[]
+  /** 本轮耗时（毫秒）。只在本次运行内有效，不落库。 */
+  durationMs?: number
 }
 
 /** 已落库的附件元数据。与待发送的 Attachment 区分：没有 base64 与预览。 */
@@ -121,7 +123,15 @@ export type ChatEvent =
   | { type: 'tool'; sessionId: string; runId: number; tool: ToolCall }
   | { type: 'meta'; sessionId: string; runId: number }
   | { type: 'context'; sessionId: string; runId: number; usage?: { tokens: number; max: number; percent: number } }
-  | { type: 'done'; sessionId: string; runId: number; message: ChatMessage; interrupted?: boolean }
+  | {
+      type: 'done'
+      sessionId: string
+      runId: number
+      message: ChatMessage
+      interrupted?: boolean
+      /** 本轮统计。CLI 在 result 里给的耗时 */
+      usage?: { durationMs?: number; ttftMs?: number; numTurns?: number }
+    }
   | { type: 'error'; sessionId: string; runId: number; error: string }
 
 /** 压缩结果事件，与 chat:event 分开推送 */

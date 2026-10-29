@@ -30,6 +30,8 @@ const viewingFile = ref<string | null>(null)
 const viewingImage = ref<string | null>(null)
 /** 右侧文件树抽屉是否展开 */
 const treeOpen = ref(false)
+/** 文件树抽屉的引用，用于对话结束后触发刷新 */
+const fileTree = ref<{ refresh: () => Promise<void> } | null>(null)
 
 /**
  * 草稿按会话保存。
@@ -68,6 +70,16 @@ const composer = ref<HTMLElement | null>(null)
 const streaming = computed(() => chat.isStreaming(currentId.value))
 const stopping = computed(() => chat.isStopping(currentId.value))
 const liveText = computed(() => chat.streamText(currentId.value))
+/** 本轮已发生的工具调用，最后一个就是"正在做什么" */
+const liveTools = computed(() => chat.streamTools(currentId.value))
+
+/** 工具目标可能是长路径/长命令，截断显示 */
+function shortToolTarget(t: string): string {
+  const one = t.replace(/\s+/g, ' ').trim()
+  if (one.length <= 48) return one
+  const parts = one.split(/[/\\]/)
+  return parts.length > 1 ? parts[parts.length - 1] : one.slice(0, 46) + '…'
+}
 
 const workspace = computed(() => {
   const s = current.value
@@ -78,6 +90,8 @@ const workspaceName = computed(() => workspace.value?.name ?? '')
 
 /* ── 上下文 ── */
 const ctxOpen = ref(false)
+/** 正在向 CLI 查询上下文用量 */
+const probing = ref(false)
 const compacting = ref(false)
 /** 锚点位置：由触发按钮的 rect 算出，替代原来靠容器居中猜的位置 */
 const ctxAnchor = ref<{ left: number; top: number; right: number } | null>(null)
@@ -87,6 +101,22 @@ function openContext(e: MouseEvent): void {
   const r = btn.getBoundingClientRect()
   ctxAnchor.value = { left: r.left, top: r.top, right: r.right }
   ctxOpen.value = true
+
+  // 不在这里重新探测。
+  //
+  // `/context` 报的是"当前上下文构成"，与对话中逐轮累积的 usage 口径不同
+  // （实测同会话对话中 7%，探测回来 5%）。每次打开都覆盖会让数字来回跳，
+  // 用户会以为统计不准。只有完全没有数据时（新会话、从未测过）才探一次。
+  const id = currentId.value
+  if (id && !sessions.isDraft && !hasContextData.value) {
+    probing.value = true
+    void chatApi
+      .probeContext(id)
+      .catch(() => {})
+      .finally(() => {
+        setTimeout(() => (probing.value = false), 1500)
+      })
+  }
 }
 
 /** 压缩上下文。命令立即返回，结果由 chat:compact 事件带回。 */
@@ -348,8 +378,15 @@ onMounted(async () => {
       const activeId = sessions.activeId
       void sessions.load()
       if (sessionId === activeId) {
-        void sessions.select(activeId)
-        void scrollToBottom()
+        // 记住刷新前的"是否在底部"：select 会整体替换消息列表，
+        // DOM 重建后 scrollTop 归 0，守卫会误判成"用户在看历史"而跳过滚动，
+        // 表现为回答完成后视图突然跳回问题所在的位置。
+        const wasAtBottom = !awayFromBottom.value
+        void sessions.select(activeId).then(() => {
+          if (wasAtBottom) void scrollToBottom(false, true)
+        })
+        // 模型这一轮很可能改了文件，抽屉开着就顺手刷一下
+        if (treeOpen.value) void fileTree.value?.refresh()
       }
       if (chat.error) toast.error(chat.error)
       // init 事件在本轮到达过，这时才拿得到全量命令清单
@@ -849,6 +886,7 @@ watch(
           :key="m.id"
           :message="m"
           :previewable="previewable"
+          :duration-ms="chat.lastDuration.get(m.id)"
           @open-file="openFile"
           @preview-image="previewImage"
         />
@@ -863,7 +901,18 @@ watch(
               <span class="who">Claude</span>
             </div>
             <div v-if="liveText" class="ai-text md" v-html="streamHtml" @click="onStreamClick" />
-            <div v-else class="thinking">
+
+            <!-- 工具执行中：与 CLI 一致地显示"正在做什么" -->
+            <div v-if="streaming && liveTools.length" class="tool-live">
+              <span class="tl-spin" />
+              <span class="tl-name">{{ liveTools[liveTools.length - 1].name }}</span>
+              <span v-if="liveTools[liveTools.length - 1].target" class="tl-target">
+                {{ shortToolTarget(liveTools[liveTools.length - 1].target) }}
+              </span>
+              <span class="tl-count">{{ liveTools.length }} 步</span>
+            </div>
+
+            <div v-if="!liveText && !liveTools.length" class="thinking">
               <span class="dots"><span class="dot" /><span class="dot" /><span class="dot" /></span>
               <span class="thinking-label">{{ stopping ? '正在停止…' : '正在思考…' }}</span>
             </div>
@@ -970,6 +1019,7 @@ watch(
       </div>
 
       <FileTreeDrawer
+        ref="fileTree"
         v-if="treeOpen && workspace"
         :workspace-id="workspace.id"
         :root-path="workspace.path"
@@ -984,6 +1034,7 @@ watch(
       :streaming="streaming"
       :percent="ctxPercent"
       :has-data="hasContextData"
+      :probing="probing"
       :tokens="current?.contextTokens ?? 0"
       :max="current?.contextMax ?? 0"
       :compacting="compacting"
@@ -1260,6 +1311,61 @@ watch(
 
 .empty p {
   font-size: 12.5px;
+}
+
+.tool-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 10px;
+  padding: 7px 11px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 11.5px;
+  color: var(--t2);
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.tl-spin {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 2px solid var(--line-3);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: tl-spin 0.7s linear infinite;
+}
+
+@keyframes tl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tl-name {
+  font-weight: 500;
+  color: var(--t1);
+  flex: none;
+}
+
+.tl-target {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.tl-count {
+  margin-left: auto;
+  flex: none;
+  font-size: 10.5px;
+  color: var(--t4);
+  padding-left: 8px;
 }
 
 .thinking {

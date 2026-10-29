@@ -33,6 +33,14 @@ export const useChatStore = defineStore('chat', () => {
   /** 生成完成但用户还没切过去看的会话 */
   const unseen = ref<Set<string>>(new Set())
 
+  /**
+   * 消息 id → 本轮耗时（毫秒）。
+   *
+   * 只在本次运行内有效：重开应用后历史消息不显示耗时，
+   * 因为那是上一次运行的事，对当下没有参考价值。
+   */
+  const lastDuration = ref<Map<string, number>>(new Map())
+
   const error = ref<string | null>(null)
 
   /** 该会话是否正在生成 */
@@ -143,6 +151,13 @@ export const useChatStore = defineStore('chat', () => {
       case 'done':
       case 'error': {
         if (ev.type === 'error') error.value = ev.error
+        // 本轮耗时随 done 一起带回，挂到消息上供界面显示
+        if (ev.type === 'done' && ev.usage?.durationMs && ev.message) {
+          lastDuration.value = new Map(lastDuration.value).set(
+            ev.message.id,
+            ev.usage.durationMs as number
+          )
+        }
         runs.value.delete(sid)
         // 用户不在这个会话上，标成待查看
         unseen.value = new Set([...unseen.value, sid])
@@ -175,6 +190,7 @@ export const useChatStore = defineStore('chat', () => {
   return {
     runs,
     unseen,
+    lastDuration,
     error,
     activeCount,
     isStreaming,

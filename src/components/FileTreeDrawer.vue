@@ -73,14 +73,32 @@ function toggle(payload: { node: TreeNode; rel: string }): void {
   expanded.value = next
 }
 
+/**
+ * 重新拉取已展开的层级。
+ *
+ * 保留展开状态——用户展开了几层目录，刷新后应该还是那几层。
+ * 只对「当前仍展开的路径」重新请求，没展开过的不用管。
+ */
 async function refresh(): Promise<void> {
-  children.value = new Map()
-  expanded.value = new Set()
-  await loadLevel('')
+  const toLoad = ['', ...expanded.value]
+  const next = new Map<string, TreeNode[]>()
+  for (const rel of toLoad) {
+    try {
+      next.set(rel, await wsApi.listDir(props.workspaceId, rel, showIgnored.value))
+    } catch {
+      // 某一层没了（目录被删）就跳过，不整棵树报错
+    }
+  }
+  children.value = next
+  // 展开过但已经不存在了的路径，从 expanded 里剔掉
+  expanded.value = new Set([...expanded.value].filter((r) => next.has(r)))
 }
 
 async function toggleIgnored(): Promise<void> {
   showIgnored.value = !showIgnored.value
+  // 忽略开关会改变可见项，展开状态也一并重置
+  children.value = new Map()
+  expanded.value = new Set()
   await refresh()
 }
 

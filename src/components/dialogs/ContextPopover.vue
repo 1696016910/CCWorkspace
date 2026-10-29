@@ -12,6 +12,8 @@ const props = defineProps<{
   anchor?: { left: number; top: number; right: number } | null
   /** false = 这个会话还没测过（新建、还没发消息），显示「暂无数据」而不是 0% */
   hasData?: boolean
+  /** 正在向 CLI 查询。查询要新起进程，约 4 秒 */
+  probing?: boolean
 }>()
 
 const emit = defineEmits<{ close: []; compact: [] }>()
@@ -62,7 +64,12 @@ const pos = computed(() => {
         <button class="x" @click="emit('close')">✕</button>
       </div>
 
-      <div v-if="props.hasData === false" class="nodata">
+      <div v-if="props.probing" class="nodata probing">
+        <span class="spin" />
+        正在查询用量…
+      </div>
+
+      <div v-else-if="props.hasData === false" class="nodata">
         这个会话还没有上下文数据。发一条消息后就会显示。
       </div>
 
@@ -71,11 +78,11 @@ const pos = computed(() => {
         <span class="tokens">{{ fmt(tokens) }} / {{ fmt(max) }} tokens</span>
       </div>
 
-      <div v-if="props.hasData !== false" class="bar">
+      <div v-if="!props.probing && props.hasData !== false" class="bar">
         <i :style="{ width: Math.min(percent, 100) + '%' }" :class="{ warn: percent > 80 }" />
       </div>
 
-      <div v-if="props.hasData !== false" class="rows">
+      <div v-if="!props.probing && props.hasData !== false" class="rows">
         <div class="row">
           <span>已用上下文</span>
           <span class="mono">{{ fmt(tokens) }}</span>
@@ -236,6 +243,28 @@ const pos = computed(() => {
   font-size: 12.5px;
   color: var(--t4);
   line-height: 1.7;
+}
+
+.nodata.probing {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.spin {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  border: 2px solid var(--line-3);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: ctx-spin 0.7s linear infinite;
+}
+
+@keyframes ctx-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .busy-hint {

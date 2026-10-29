@@ -6,7 +6,9 @@ mod claude;
 mod config;
 mod db;
 mod file;
+mod pool;
 mod service;
+mod session;
 mod skills;
 
 use serde::Serialize;
@@ -23,17 +25,25 @@ struct ActiveRun {
 /// 同时生成的会话上限。每轮都是一个 claude 子进程，放开会吃掉内存与 API 额度。
 const MAX_CONCURRENT_RUNS: usize = 10;
 
-/// 流式增量攒批间隔。逐 token 发 IPC 时一次长回复有数千条消息，
-/// 多会话并发时前端会被事件淹没。
-const FLUSH_INTERVAL_MS: u64 = 80;
-
-#[derive(Default)]
 struct AppState {
     run_seq: AtomicU64,
     /// 按会话分桶。单槽位时新开一轮会覆盖旧那轮的停止句柄，导致旧进程无法中断。
     active: Mutex<std::collections::HashMap<String, ActiveRun>>,
     /// CLI 在 init 事件里报的能力清单。首轮对话之后才有内容。
     meta: Mutex<Option<claude::Meta>>,
+    /// 会话进程池：常驻 LRU 最多 3 个，省掉每轮 4.4s 的启动开销。
+    pool: Arc<pool::Pool>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            run_seq: AtomicU64::new(0),
+            active: Mutex::new(std::collections::HashMap::new()),
+            meta: Mutex::new(None),
+            pool: pool::Pool::new(),
+        }
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -68,8 +78,13 @@ fn emit(app: &tauri::AppHandle, ev: ChatEvent) {
 /// 它给的是 CLI 自己算的权威值，比我们从 usage 推算的可靠。
 ///
 /// 在后台线程里跑，不阻塞调用方。
-fn probe_context(app: &tauri::AppHandle, session_id: &str) {
-    let sid = session_id.to_string();
+/// 查询某会话的上下文用量。用户打开上下文弹窗时调用。
+///
+/// `/context` 不调模型（`duration_api_ms=0`），但要新起一个 CLI 进程，
+/// 实测约 4.3s。所以只在用户主动查看时查，不再每轮自动跑。
+#[tauri::command]
+fn context_probe(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
+    let sid = session_id;
     let app2 = app.clone();
     std::thread::spawn(move || {
         let Ok((cwd, resume)) = db::with(|c| {
@@ -140,6 +155,9 @@ fn probe_context(app: &tauri::AppHandle, session_id: &str) {
             );
         }
     });
+
+    // 探测在后台跑，结果经 chat:event 的 context 消息回传
+    Ok(())
 }
 
 // ── 工作区 ──
@@ -523,24 +541,18 @@ fn chat_send(
         let tools: Arc<Mutex<Vec<service::ToolCall>>> = Arc::new(Mutex::new(vec![]));
         let acc2 = acc.clone();
         let tools2 = tools.clone();
+        // 本轮统计：CLI 在 result 里给耗时，done 事件带给前端
+        let stats: Arc<Mutex<Option<(i64, i64, i64)>>> = Arc::new(Mutex::new(None));
+        let stats2 = stats.clone();
 
-        // 攒批缓冲：文本增量先堆在这里，由独立线程每 FLUSH_INTERVAL_MS 推一次
-        let buf: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
-        let buf2 = buf.clone();
-        let flushing = Arc::new(AtomicBool::new(true));
-
+        // 文本增量走 channel：有数据立刻推，没数据阻塞。
+        // 原来是 sleep(80ms) 轮询——空转 12 次/秒，首字还多等 0-80ms。
+        let (text_tx, text_rx) = std::sync::mpsc::channel::<String>();
         let flusher = {
-            let buf = buf.clone();
-            let flushing = flushing.clone();
             let app = app2.clone();
             let sid = sid.clone();
             std::thread::spawn(move || {
-                while flushing.load(Ordering::Relaxed) {
-                    std::thread::sleep(std::time::Duration::from_millis(FLUSH_INTERVAL_MS));
-                    let chunk = buf.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
-                    if chunk.is_empty() {
-                        continue;
-                    }
+                while let Ok(chunk) = text_rx.recv() {
                     emit(
                         &app,
                         ChatEvent {
@@ -559,14 +571,53 @@ fn chat_send(
             })
         };
 
-        let res = claude::run(opts, stop2, |ev| match ev {
+        // 从池里取常驻进程；没有就新建一个，用完放回池。
+        // 每轮新建进程要付 4.4s 启动开销，实测一轮 8.5s 里占一半。
+        let pool = state_active.pool.clone();
+        let t0 = std::time::Instant::now();
+        let mut reused = true;
+        let mut proc = match pool.take_resident(&sid) {
+            Some(p) => p,
+            None => {
+                reused = false;
+                match session::SessionProcess::spawn(&opts) {
+                    Ok(p) => p,
+                Err(e) => {
+                    if let Ok(mut active) = state_active.active.lock() {
+                        active.remove(&sid);
+                    }
+                    emit(
+                        &app2,
+                        ChatEvent {
+                            kind: "error".into(),
+                            session_id: sid.clone(),
+                            run_id,
+                            delta: None,
+                            tool: None,
+                            message: None,
+                            usage: None,
+                            interrupted: None,
+                            error: Some(e),
+                        },
+                    );
+                        return;
+                    }
+                }
+            }
+        };
+        eprintln!(
+            "[wb] 会话 {} {}（{}ms）",
+            &sid[..8.min(sid.len())],
+            if reused { "复用常驻进程" } else { "新建进程" },
+            t0.elapsed().as_millis()
+        );
+
+        let res = proc.run_turn(&opts.text, &opts.images, stop2, |ev| match ev {
             claude::Event::Text(d) => {
                 if let Ok(mut a) = acc2.lock() {
                     a.push_str(&d);
                 }
-                if let Ok(mut b) = buf2.lock() {
-                    b.push_str(&d);
-                }
+                let _ = text_tx.send(d);
             }
             claude::Event::Tool(n, t) => {
                 let tc = service::ToolCall { name: n, target: t };
@@ -626,6 +677,15 @@ fn chat_send(
                     Ok(())
                 });
             }
+            claude::Event::Done {
+                duration_ms,
+                ttft_ms,
+                num_turns,
+            } => {
+                if let Ok(mut slot) = stats2.lock() {
+                    *slot = Some((duration_ms, ttft_ms, num_turns));
+                }
+            }
             claude::Event::Error(m) => {
                 emit(
                     &app2,
@@ -644,26 +704,20 @@ fn chat_send(
             }
         });
 
-        // 先停掉定时器，再补推剩余文字，避免两处同时 flush 出现乱序
-        flushing.store(false, Ordering::Relaxed);
+        // 关掉发送端，flusher 读完就退出
+        drop(text_tx);
         let _ = flusher.join();
-        if let Ok(mut b) = buf.lock() {
-            if !b.is_empty() {
-                emit(
-                    &app2,
-                    ChatEvent {
-                        kind: "text".into(),
-                        session_id: sid.clone(),
-                        run_id,
-                        delta: Some(std::mem::take(&mut *b)),
-                        tool: None,
-                        message: None,
-                        usage: None,
-                        interrupted: None,
-                        error: None,
-                    },
-                );
-            }
+
+        // 决定这个进程是留着还是丢掉：
+        // - 正常结束 —— 放回池，下次直接复用
+        // - 中断/超时 —— 丢掉，下次重建（带 --resume 接回上下文）
+        let reusable =
+            matches!(&res, Ok(o) if !o.interrupted && !o.timed_out && !o.process_died)
+                && proc.alive();
+        if reusable {
+            pool.put_resident(sid.clone(), proc);
+        } else {
+            drop(proc);
         }
 
         let acc_text = acc.lock().map(|a| a.clone()).unwrap_or_default();
@@ -686,6 +740,7 @@ fn chat_send(
                 let saved = db::with(|c| {
                     service::append_message(c, &sid, "assistant", &body, &tool_list, false, &[])
                 });
+                let elapsed = stats.lock().ok().and_then(|s| *s);
                 if let Ok(msg) = saved {
                     emit(
                         &app2,
@@ -696,15 +751,20 @@ fn chat_send(
                             delta: None,
                             tool: None,
                             message: Some(msg),
-                            usage: None,
+                            usage: elapsed.map(|(d, ttft, turns)| {
+                                serde_json::json!({
+                                    "durationMs": d,
+                                    "ttftMs": ttft,
+                                    "numTurns": turns,
+                                })
+                            }),
                             interrupted: None,
                             error: None,
                         },
                     );
-                    // 本轮结束后用 `/context` 校准一次。它是本地命令
-                    // （num_turns=0、usage 全 0、实测 179ms），几乎免费，
-                    // 而且给的是 CLI 自己算的权威值。
-                    probe_context(&app2, &sid);
+                    // 不再每轮探测上下文：`/context` 虽不调模型，
+                    // 但要新起一个 CLI 进程，实测 4.3s——只为一个用户未必在看的数字。
+                    // 改成用户打开弹窗时按需查询（context_probe 命令）。
                 }
             }
             Ok(_) => {
@@ -823,8 +883,33 @@ fn context_compact(
     let app2 = app.clone();
     std::thread::spawn(move || {
         let state_active = app2.state::<AppState>();
+        let pool = state_active.pool.clone();
+
+        // 复用常驻进程：压缩和随后的探测可以共用同一个进程，
+        // 省掉两次 4.4s 的启动开销。
+        let mut proc = match pool.take_resident(&session_id) {
+            Some(p) => p,
+            None => match session::SessionProcess::spawn(&opts) {
+                Ok(p) => p,
+                Err(e) => {
+                    if let Ok(mut active) = state_active.active.lock() {
+                        active.remove(&session_id);
+                    }
+                    let _ = app2.emit(
+                        "chat:compact",
+                        serde_json::json!({
+                            "sessionId": session_id,
+                            "ok": false,
+                            "error": e,
+                        }),
+                    );
+                    return;
+                }
+            },
+        };
+
         let mut summary = String::new();
-        let res = claude::run(opts, stop, |ev| {
+        let res = proc.run_turn("/compact", &[], stop, |ev| {
             if let claude::Event::Text(d) = ev {
                 summary.push_str(&d);
             }
@@ -848,24 +933,21 @@ fn context_compact(
             Ok(o) if o.timed_out => Err("压缩超时，请稍后重试".to_string()),
             Ok(o) if o.interrupted => Err("压缩已中断".to_string()),
             Ok(_) => {
-                // 压缩后立刻问一次 `/context`。它是本地命令：num_turns=0、
-                // duration_api_ms=0、usage 全 0，实测只花 179ms，几乎免费。
-                // 不这样做就只能把面板归零，用户会看到「0% / 0 tokens」。
+                // 压缩后立刻问一次 `/context`。关键是**复用同一个进程**——
+                // 新起一个要多付 4.4s，而这里进程已经在手上。
                 let mut probed: Option<(i64, i64, f64)> = None;
-                let probe_opts = claude::Options {
-                    cwd: cwd.clone(),
-                    text: "/context".into(),
-                    model: model.clone(),
-                    resume: resume.clone(),
-                    mode: "acceptEdits".into(),
-                    env: env.clone(),
-                    images: vec![],
-                };
-                let _ = claude::run(probe_opts, Arc::new(AtomicBool::new(false)), |ev| {
-                    if let claude::Event::Context { total, max, percent } = ev {
-                        probed = Some((total, max, percent));
-                    }
-                });
+                if proc.alive() {
+                    let _ = proc.run_turn(
+                        "/context",
+                        &[],
+                        Arc::new(AtomicBool::new(false)),
+                        |ev| {
+                            if let claude::Event::Context { total, max, percent } = ev {
+                                probed = Some((total, max, percent));
+                            }
+                        },
+                    );
+                }
 
                 db::with(|c| {
                     service::append_message(c, &session_id, "assistant", &body, &[], false, &[])?;
@@ -878,6 +960,13 @@ fn context_compact(
                 })
             }
         };
+
+        // 进程放回池，下次对话直接复用
+        if proc.alive() {
+            pool.put_resident(session_id.clone(), proc);
+        } else {
+            drop(proc);
+        }
 
         let _ = app2.emit(
             "chat:compact",
@@ -904,6 +993,8 @@ fn chat_interrupt(state: State<'_, AppState>, session_id: Option<String>) -> Res
                 .get(&sid)
                 .ok_or("该会话没有正在进行的生成")?;
             run.stop.store(true, Ordering::SeqCst);
+            // 中断后进程状态不可信，直接丢掉，下轮重建（带 --resume 接回上下文）
+            state.pool.evict(&sid);
         }
         None => {
             // 兼容旧调用：没有目标时按「全部停止」处理
@@ -991,6 +1082,15 @@ fn workspace_reveal(id: String) -> Result<(), String> {
 
 // ── 应用信息 ──
 
+/// 诊断用：当前常驻会话进程数。也方便排查「进程是不是泄漏了」。
+#[tauri::command]
+fn pool_status(state: State<'_, AppState>) -> serde_json::Value {
+    serde_json::json!({
+        "resident": state.pool.resident_count(),
+        "maxResident": 3,
+    })
+}
+
 #[tauri::command]
 fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
@@ -1008,6 +1108,17 @@ fn main() {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title("Claude 工作台 · Tauri 版");
             }
+
+            // 每 60 秒扫一次空闲进程，超过 5 分钟没用就回收
+            let pool = app.state::<AppState>().pool.clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(60));
+                let n = pool.sweep_idle();
+                if n > 0 {
+                    eprintln!("[wb] 回收 {n} 个空闲会话进程");
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1058,9 +1169,17 @@ fn main() {
             workspace_list_dir,
             chat_send,
             chat_interrupt,
+            context_probe,
             context_compact,
             app_version,
+            pool_status,
         ])
-        .run(tauri::generate_context!())
-        .expect("Tauri 启动失败");
+        .build(tauri::generate_context!())
+        .expect("Tauri 启动失败")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                // 退出时杀掉所有常驻进程，避免留下僵尸
+                app.state::<AppState>().pool.shutdown();
+            }
+        });
 }

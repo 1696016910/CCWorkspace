@@ -40,6 +40,12 @@ pub enum Event {
     /// init 事件带来的可用能力清单。CLI 是唯一权威来源：用户自定义 Skill、
     /// 用户命令、项目命令、插件命令与内置命令都在里面，扫目录只能拿到子集。
     Meta(Meta),
+    /// 本轮结束时的统计。CLI 在 result 里给了耗时与轮次。
+    Done {
+        duration_ms: i64,
+        ttft_ms: i64,
+        num_turns: i64,
+    },
     Error(String),
 }
 
@@ -57,6 +63,8 @@ pub struct Meta {
 pub struct Outcome {
     pub interrupted: bool,
     pub timed_out: bool,
+    /// 进程自己没了（stdout 关闭），不是被我们停的
+    pub process_died: bool,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -82,26 +90,7 @@ pub fn run(
     should_stop: Arc<AtomicBool>,
     mut on_event: impl FnMut(Event),
 ) -> Result<Outcome, String> {
-    let mut args: Vec<String> = vec![
-        "--print".into(),
-        "--input-format".into(),
-        "stream-json".into(),
-        "--output-format".into(),
-        "stream-json".into(),
-        "--verbose".into(),
-        "--include-partial-messages".into(),
-    ];
-    let mode = if opts.mode.is_empty() { "acceptEdits" } else { &opts.mode };
-    args.push("--permission-mode".into());
-    args.push(mode.into());
-    if !opts.resume.is_empty() {
-        args.push("--resume".into());
-        args.push(opts.resume.clone());
-    }
-    if !opts.model.is_empty() {
-        args.push("--model".into());
-        args.push(opts.model.clone());
-    }
+    let args = build_args(&opts);
 
     let mut cmd = build_command(&args);
     if !opts.cwd.is_empty() {
@@ -216,7 +205,7 @@ pub fn run(
 /// 误判成"连接超时"并杀掉进程，界面表现为「模型没有返回任何内容」。
 ///
 /// hook 事件仍要排除：挂住的 hook 会不断刷新计时器，让超时永远触发不了。
-fn is_valid_event(v: &Value) -> bool {
+pub fn is_valid_event(v: &Value) -> bool {
     let typ = v.get("type").and_then(Value::as_str).unwrap_or("");
     let sub = v.get("subtype").and_then(Value::as_str).unwrap_or("");
     match typ {
@@ -230,7 +219,7 @@ fn is_valid_event(v: &Value) -> bool {
 ///
 /// 只杀直接子进程是不够的：Windows 下启动链是 cmd.exe -> node -> 工具子进程，
 /// 杀 cmd 之后 node 还在跑，继续往管道写，表现为「点了停止，十秒后内容一起涌出来」。
-fn kill_tree(child: &mut Child) {
+pub fn kill_tree(child: &mut Child) {
     let pid = child.id();
 
     #[cfg(target_os = "windows")]
@@ -256,7 +245,32 @@ fn kill_tree(child: &mut Child) {
     let _ = child.kill();
 }
 
-fn build_command(args: &[String]) -> Command {
+/// 拼命令行参数。run 与常驻会话共用同一套。
+pub fn build_args(opts: &Options) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "--print".into(),
+        "--input-format".into(),
+        "stream-json".into(),
+        "--output-format".into(),
+        "stream-json".into(),
+        "--verbose".into(),
+        "--include-partial-messages".into(),
+    ];
+    let mode = if opts.mode.is_empty() { "acceptEdits" } else { &opts.mode };
+    args.push("--permission-mode".into());
+    args.push(mode.into());
+    if !opts.resume.is_empty() {
+        args.push("--resume".into());
+        args.push(opts.resume.clone());
+    }
+    if !opts.model.is_empty() {
+        args.push("--model".into());
+        args.push(opts.model.clone());
+    }
+    args
+}
+
+pub fn build_command(args: &[String]) -> Command {
     #[cfg(target_os = "windows")]
     {
         // npm 装的 claude 是 .cmd 垫片，直接 spawn 会 ENOENT
@@ -277,7 +291,7 @@ fn build_command(args: &[String]) -> Command {
 }
 
 #[derive(Default)]
-struct State {
+pub struct State {
     acc: String,
     tools: usize,
     run_err: String,
@@ -286,7 +300,7 @@ struct State {
 }
 
 impl State {
-    fn handle(&mut self, msg: &Value, emit: &mut impl FnMut(Event)) {
+    pub fn handle(&mut self, msg: &Value, emit: &mut impl FnMut(Event)) {
         let typ = msg.get("type").and_then(Value::as_str).unwrap_or("");
         let sub = msg.get("subtype").and_then(Value::as_str).unwrap_or("");
 
@@ -432,9 +446,17 @@ impl State {
                 percent: pct,
             });
         }
+
+        // 本轮耗时：CLI 自己算的，比自己掐表准（它排除了一些非模型时间）
+        let g2 = |k: &str| msg.get(k).and_then(Value::as_i64).unwrap_or(0);
+        emit(Event::Done {
+            duration_ms: g2("duration_ms"),
+            ttft_ms: g2("ttft_ms"),
+            num_turns: g2("num_turns"),
+        });
     }
 
-    fn finish(&mut self, emit: &mut impl FnMut(Event)) {
+    pub fn finish(&mut self, emit: &mut impl FnMut(Event)) {
         if !self.run_err.is_empty() {
             emit(Event::Error(self.run_err.clone()));
             return;

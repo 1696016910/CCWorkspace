@@ -47,6 +47,16 @@ export function compact(sessionId: string): Promise<void> {
   return call('context_compact', { sessionId })
 }
 
+/**
+ * 查询上下文用量。
+ *
+ * 它要新起一个 CLI 进程（实测 4.3s），所以只在用户打开弹窗时调，
+ * 不再由后端每轮自动执行。
+ */
+export function probeContext(sessionId: string): Promise<void> {
+  return call('context_probe', { sessionId })
+}
+
 /** CLI 上报的可用能力清单。首轮对话前为 null。 */
 export function meta(): Promise<CliMeta | null> {
   return call('cli_meta')
