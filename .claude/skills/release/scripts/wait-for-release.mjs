@@ -14,20 +14,19 @@ const API = `https://api.github.com/repos/${OWNER}/${REPO}`
 const MAX_WAIT_MS = 20 * 60 * 1000
 const POLL_MS = 15 * 1000
 
-/** 客户端真正需要的产物，缺一项都算发布不完整 */
-// macOS 同时产出 arm64 与 x64，两种架构都接受；
-// 写死单个架构会在 runner 换成 Intel 时误报"产物缺失"
-const MAC_ARCH = '(arm64|x64)'
+/**
+ * 客户端真正需要的产物，缺一项都算发布不完整。
+ *
+ * 这个项目是 Tauri + NSIS，只出 Windows 安装包：
+ *   ClaudeWorkbench_<版本>_x64-setup.exe
+ * 注意分隔符是下划线、带 -setup 后缀 —— 与 Electron 版的
+ * ClaudeWorkbench-<版本>-x64.exe 不同，别照抄旧规则。
+ */
 const REQUIRED = [
-  { label: 'Windows 安装包', test: (n, v) => n === `ClaudeWorkbench-${v}-x64.exe` },
-  { label: 'Windows 差分索引', test: (n, v) => n === `ClaudeWorkbench-${v}-x64.exe.blockmap` },
-  { label: 'Linux AppImage', test: (n, v) => n === `ClaudeWorkbench-${v}-x86_64.AppImage` },
-  { label: 'macOS 安装包', test: (n, v) => new RegExp(`^ClaudeWorkbench-${v}-${MAC_ARCH}\.dmg$`).test(n) },
-  // Squirrel.Mac 自更新只认 zip，缺了它 mac 端永远更新不了
-  { label: 'macOS 自更新包', test: (n, v) => new RegExp(`^ClaudeWorkbench-${v}-${MAC_ARCH}\.zip$`).test(n) },
-  { label: 'Windows 更新元数据', test: (n) => n === 'latest.yml' },
-  { label: 'macOS 更新元数据', test: (n) => n === 'latest-mac.yml' },
-  { label: 'Linux 更新元数据', test: (n) => n === 'latest-linux.yml' }
+  {
+    label: 'Windows 安装包',
+    test: (n, v) => n === `ClaudeWorkbench_${v}_x64-setup.exe`
+  }
 ]
 
 const args = process.argv.slice(2)

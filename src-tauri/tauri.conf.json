@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Claude 工作台",
+  "productName": "ClaudeWorkbench",
   "version": "0.2.2",
   "identifier": "com.jianzhou.claude-workbench-ta",
   "build": {
