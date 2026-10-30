@@ -119,7 +119,7 @@ node .claude/skills/release/scripts/wait-for-release.mjs v0.1.2 --verify
 
 `--verify` 会检查这几项，缺任何一项都算发布失败：
 
-- Windows：`ClaudeWorkbench-<版本>-x64.exe` + `.blockmap`
+- Windows：`CCWorkbench_<版本>_x64-setup.exe` + `.blockmap`
 - Linux：`ClaudeWorkbench-<版本>-x86_64.AppImage`
 - macOS：`.dmg` **和 `.zip`**（zip 是 Squirrel 自更新的必要产物）
 - 三份元数据：`latest.yml`、`latest-mac.yml`、`latest-linux.yml`

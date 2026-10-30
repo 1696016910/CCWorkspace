@@ -18,14 +18,14 @@ const POLL_MS = 15 * 1000
  * 客户端真正需要的产物，缺一项都算发布不完整。
  *
  * 这个项目是 Tauri + NSIS，只出 Windows 安装包：
- *   ClaudeWorkbench_<版本>_x64-setup.exe
+ *   CCWorkbench_<版本>_x64-setup.exe
  * 注意分隔符是下划线、带 -setup 后缀 —— 与 Electron 版的
- * ClaudeWorkbench-<版本>-x64.exe 不同，别照抄旧规则。
+ * CCWorkbench-<版本>-x64.exe 不同，别照抄旧规则。
  */
 const REQUIRED = [
   {
     label: 'Windows 安装包',
-    test: (n, v) => n === `ClaudeWorkbench_${v}_x64-setup.exe`
+    test: (n, v) => n === `CCWorkbench_${v}_x64-setup.exe`
   }
 ]
 
